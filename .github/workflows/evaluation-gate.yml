@@ -8,8 +8,8 @@ on:
       - "tests/fixtures/ragas_tax_cases.json"
       - "pyproject.toml"
       - "poetry.lock"
-  schedule:
-    - cron: "0 6 * * *"  # 06:00 UTC daily, after nightly delta has run
+  # schedule:
+  #   - cron: "0 6 * * *"  # 06:00 UTC daily, after nightly delta has run
   workflow_dispatch: {}
 
 permissions:

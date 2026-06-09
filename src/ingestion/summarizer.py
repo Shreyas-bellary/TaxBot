@@ -1,7 +1,7 @@
 """Table summarisation with a Gemini Flash primary and OpenRouter fallback.
 
 The summariser produces a *deterministic* 3-sentence description for every
-table extracted by Unstructured. The full markdown table is preserved in the 
+table extracted by Unstructured. The full markdown table is preserved in the
 parent node so the LLM always sees the raw data.
 
 A strict heuristic post-validator enforces:
