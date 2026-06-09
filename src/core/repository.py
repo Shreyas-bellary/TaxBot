@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from core.db import Database
@@ -34,9 +34,9 @@ def _coerce_metadata(value: Any) -> dict[str, object]:
     if isinstance(value, dict):
         return value
     if isinstance(value, bytes | bytearray):
-        return json.loads(value.decode("utf-8"))
+        return cast(dict[str, object], json.loads(value.decode("utf-8")))
     if isinstance(value, str):
-        return json.loads(value)
+        return cast(dict[str, object], json.loads(value))
     raise TypeError(f"Unsupported metadata payload: {type(value)!r}")
 
 

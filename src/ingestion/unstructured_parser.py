@@ -150,7 +150,8 @@ def _elements_to_document(elements: list[Any]) -> UnstructuredDocument:
 
 def html_table_to_markdown(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
-    table = soup.find("table") or soup
+    found = soup.find("table")
+    table: Tag = found if isinstance(found, Tag) else soup
     rows: list[list[str]] = []
     for tr in table.find_all("tr"):
         if not isinstance(tr, Tag):

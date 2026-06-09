@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
 from google import genai
@@ -25,6 +26,9 @@ from core.errors import RetrievalError
 from core.logging_config import get_logger
 from core.models import GenerationResult, RetrievedContext
 from core.security import InputGuard, OutputGuard, SanitizedQuery
+
+if TYPE_CHECKING:
+    from core.retrieval import HybridRetriever
 
 logger = get_logger(__name__)
 
@@ -67,7 +71,7 @@ class AnswerGenerator:
 
     def __init__(
         self,
-        retriever,  # core.retrieval.HybridRetriever; typed loose to avoid cycles
+        retriever: HybridRetriever,
         *,
         input_guard: InputGuard | None = None,
         output_guard: OutputGuard | None = None,

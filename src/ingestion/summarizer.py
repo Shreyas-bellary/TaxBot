@@ -196,7 +196,7 @@ def _make_openrouter_summarizer(settings: Settings) -> SummarizeFn | None:
                     )
                     if not content.strip():
                         raise SummarizationError("OpenRouter returned empty content")
-                    return content.strip()
+                    return str(content).strip()
         raise SummarizationError("OpenRouter call exhausted retries")  # pragma: no cover
 
     return _summarize

@@ -100,7 +100,7 @@ ignore = ["E501"]
 known-first-party = ["ingestion", "core", "evaluation", "api"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -115,12 +115,11 @@ plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
 module = [
+    "asyncpg",
     "ragas.*",
     "datasets.*",
     "unstructured_client.*",
-    "supabase.*",
     "pgvector.*",
-    "llama_index.*",
 ]
 ignore_missing_imports = true
 

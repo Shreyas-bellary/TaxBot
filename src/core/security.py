@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Final
+from uuid import UUID
 
 from pydantic import HttpUrl
 
@@ -142,7 +143,7 @@ class OutputGuard:
             raise OutputCitationError("Completion leaked the user-query fence tags")
 
         cited_urls: list[HttpUrl] = []
-        used_parents: list = []
+        used_parents: list[UUID] = []
         for parent in context.parent_nodes:
             source_url = parent.metadata.get("source_url")
             if not isinstance(source_url, str):

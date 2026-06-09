@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
 from pgvector.asyncpg import register_vector
@@ -66,11 +66,11 @@ class Database:
 
     async def execute(self, query: str, *args: Any) -> str:
         async with self.acquire() as connection:
-            return await connection.execute(query, *args)
+            return cast(str, await connection.execute(query, *args))
 
     async def fetch(self, query: str, *args: Any) -> Sequence[asyncpg.Record]:
         async with self.acquire() as connection:
-            return await connection.fetch(query, *args)
+            return cast(Sequence[asyncpg.Record], await connection.fetch(query, *args))
 
     async def fetchrow(self, query: str, *args: Any) -> asyncpg.Record | None:
         async with self.acquire() as connection:

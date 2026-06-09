@@ -22,6 +22,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from uuid import UUID
 
+from pydantic import HttpUrl
+
 from core.config import Settings, get_settings
 from core.errors import RetrievalError
 from core.logging_config import get_logger
@@ -142,7 +144,8 @@ class HybridRetriever:
 
         parents: OrderedDict[UUID, ParentNode] = OrderedDict()
         matched_child_ids: list[UUID] = []
-        source_urls: list[str] = []
+        source_urls: list[HttpUrl] = []
+        seen_source_urls: set[str] = set()
 
         for row in rows:
             parent_id = UUID(str(row["parent_id"]))
@@ -156,8 +159,9 @@ class HybridRetriever:
                     metadata=parent_metadata,
                 )
                 url = parent_metadata.get("source_url")
-                if isinstance(url, str) and url and url not in source_urls:
-                    source_urls.append(url)
+                if isinstance(url, str) and url and url not in seen_source_urls:
+                    seen_source_urls.add(url)
+                    source_urls.append(HttpUrl(url))
             if len(parents) >= self._top_k_parents:
                 break
 
@@ -165,5 +169,5 @@ class HybridRetriever:
             query=query,
             parent_nodes=tuple(parents.values()),
             matched_child_ids=tuple(matched_child_ids),
-            source_urls=tuple(source_urls),  # type: ignore[arg-type]
+            source_urls=tuple(source_urls),
         )
