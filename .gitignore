@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.python-version
+
+# Poetry / package caches
+.poetry-cache/
+
+# Tests / type checkers
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Local artefacts
+.taxbot/
+data/
+downloads/
+artifacts/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Frontend (deferred, but pre-emptively ignored)
+node_modules/
+.next/
+out/

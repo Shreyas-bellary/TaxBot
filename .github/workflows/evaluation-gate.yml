@@ -1,0 +1,57 @@
+name: Evaluation Gate (Ragas)
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "src/**"
+      - "tests/fixtures/ragas_tax_cases.json"
+      - "pyproject.toml"
+      - "poetry.lock"
+  schedule:
+    - cron: "0 6 * * *"  # 06:00 UTC daily, after nightly delta has run
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  ragas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pipx install poetry==2.4.1
+
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry/virtualenvs
+          key: poetry-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            poetry-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Run Ragas evaluation
+        env:
+          TAXBOT_POSTGRES_DSN: ${{ secrets.TAXBOT_POSTGRES_DSN }}
+          TAXBOT_SUPABASE_URL: ${{ secrets.TAXBOT_SUPABASE_URL }}
+          TAXBOT_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TAXBOT_SUPABASE_SERVICE_ROLE_KEY }}
+          TAXBOT_UNSTRUCTURED_API_KEY: ${{ secrets.TAXBOT_UNSTRUCTURED_API_KEY }}
+          TAXBOT_HUGGINGFACE_API_TOKEN: ${{ secrets.TAXBOT_HUGGINGFACE_API_TOKEN }}
+          TAXBOT_GEMINI_API_KEY: ${{ secrets.TAXBOT_GEMINI_API_KEY }}
+          TAXBOT_FAITHFULNESS_THRESHOLD: "0.92"
+          TAXBOT_ANSWER_RELEVANCY_THRESHOLD: "0.85"
+          TAXBOT_CONTEXT_PRECISION_THRESHOLD: "0.85"
+          TAXBOT_CONTEXT_RECALL_THRESHOLD: "0.85"
+        run: poetry run taxbot-evaluate

@@ -1,0 +1,146 @@
+{
+  "version": "1.0",
+  "description": "20 multi-layered US tax edge cases used by the Ragas evaluation gate.",
+  "cases": [
+    {
+      "id": "case_01_standard_deduction_mfj_2024",
+      "question": "For tax year 2024, what is the standard deduction for a married couple filing jointly where both spouses are under 65 and not blind?",
+      "expected_doc_numbers": ["Publication 17", "Form 1040 Instructions"],
+      "expected_tax_year": 2024,
+      "ground_truth": "For tax year 2024, the standard deduction for married couples filing jointly is $29,200 when both spouses are under 65 and not blind."
+    },
+    {
+      "id": "case_02_qbi_threshold_2023",
+      "question": "What were the 2023 taxable-income thresholds at which the Section 199A QBI deduction begins to phase out for a single filer who is in a specified service trade or business?",
+      "expected_doc_numbers": ["Publication 535", "Form 8995-A Instructions"],
+      "expected_tax_year": 2023,
+      "ground_truth": "For tax year 2023, a single filer in a specified service trade or business begins the Section 199A QBI deduction phase-out at $182,100 of taxable income and is fully phased out at $232,100."
+    },
+    {
+      "id": "case_03_form_2555_pe_test",
+      "question": "How does Form 2555 instruct a US citizen working abroad to determine whether they meet the physical presence test for the foreign earned income exclusion?",
+      "expected_doc_numbers": ["Form 2555 Instructions"],
+      "expected_tax_year": null,
+      "ground_truth": "Form 2555 instructs that the physical presence test is met if a US citizen is physically present in a foreign country (or countries) for at least 330 full days during any 12 consecutive months."
+    },
+    {
+      "id": "case_04_amt_exemption_2022",
+      "question": "For 2022, what was the AMT exemption amount for a married couple filing jointly, and at what AMTI does that exemption begin to phase out?",
+      "expected_doc_numbers": ["Form 6251 Instructions"],
+      "expected_tax_year": 2022,
+      "ground_truth": "For 2022, the AMT exemption for married filing jointly was $118,100 and it began to phase out at AMTI of $1,079,800."
+    },
+    {
+      "id": "case_05_form_1116_high_tax_kickout",
+      "question": "When does the high-tax kickout under Form 1116 require passive-category income to be reclassified as general-category income for the foreign tax credit?",
+      "expected_doc_numbers": ["Form 1116 Instructions"],
+      "expected_tax_year": null,
+      "ground_truth": "The high-tax kickout reclassifies passive-category income as general-category income when the foreign taxes paid on that income exceed the highest US tax that could be imposed on it."
+    },
+    {
+      "id": "case_06_estimated_tax_safe_harbor",
+      "question": "What is the safe-harbor rule for individuals avoiding the estimated tax underpayment penalty when their prior-year AGI exceeded $150,000?",
+      "expected_doc_numbers": ["Form 2210 Instructions", "Publication 505"],
+      "expected_tax_year": null,
+      "ground_truth": "Individuals with prior-year AGI above $150,000 avoid the underpayment penalty if total withholding plus estimated payments equals at least 110% of the prior year's tax liability, or 90% of the current year's tax."
+    },
+    {
+      "id": "case_07_form_8606_basis",
+      "question": "How does Form 8606 require a taxpayer to track and recover basis from nondeductible traditional IRA contributions when taking a distribution?",
+      "expected_doc_numbers": ["Form 8606 Instructions"],
+      "expected_tax_year": null,
+      "ground_truth": "Form 8606 requires the taxpayer to apply the pro-rata rule by multiplying each distribution by the ratio of total nondeductible basis to the aggregate year-end value of all traditional IRAs."
+    },
+    {
+      "id": "case_08_s_corp_basis_form_7203",
+      "question": "What three components must an S corporation shareholder track on Form 7203 to determine whether a loss is currently deductible?",
+      "expected_doc_numbers": ["Form 7203 Instructions"],
+      "expected_tax_year": null,
+      "ground_truth": "Form 7203 requires tracking of stock basis, debt basis, and the at-risk amount to determine whether an S corporation loss is currently deductible."
+    },
+    {
+      "id": "case_09_research_credit_section_174",
+      "question": "Following the TCJA-era change to Section 174, how must a calendar-year corporation amortize specified research or experimental expenditures incurred in 2024?",
+      "expected_doc_numbers": ["Publication 535", "Form 6765 Instructions"],
+      "expected_tax_year": 2024,
+      "ground_truth": "For 2024, Section 174 requires specified research or experimental expenditures incurred in the US to be capitalized and amortized straight-line over 5 years, and foreign research over 15 years, beginning with the midpoint of the year of expenditure."
+    },
+    {
+      "id": "case_10_form_5471_category_4",
+      "question": "Which Form 5471 filing category applies to a US person who acquires more than 10% of a foreign corporation's stock and reaches at least 50% during the year?",
+      "expected_doc_numbers": ["Form 5471 Instructions"],
+      "expected_tax_year": null,
+      "ground_truth": "A US person who acquires more than 10% and reaches at least 50% ownership of a foreign corporation is a Category 4 filer of Form 5471."
+    },
+    {
+      "id": "case_11_qcd_age_70_5",
+      "question": "What are the eligibility, dollar cap, and reporting requirements for a Qualified Charitable Distribution from an IRA in 2024?",
+      "expected_doc_numbers": ["Publication 590-B"],
+      "expected_tax_year": 2024,
+      "ground_truth": "For 2024, an IRA owner age 70 1/2 or older may make a Qualified Charitable Distribution of up to $105,000 directly to a qualified charity; the QCD is excluded from gross income and reported on Form 1040 line 4b as a zero taxable amount with QCD noted."
+    },
+    {
+      "id": "case_12_section_121_exclusion_partial",
+      "question": "When can a taxpayer who fails the two-year ownership/use test still claim a partial Section 121 exclusion on the sale of a primary residence?",
+      "expected_doc_numbers": ["Publication 523"],
+      "expected_tax_year": null,
+      "ground_truth": "A partial Section 121 exclusion is available when the sale is due to a change in employment, health, or unforeseen circumstances, prorated by the ratio of months of qualifying use to 24 months."
+    },
+    {
+      "id": "case_13_form_8938_thresholds_mfj",
+      "question": "What are the year-end and at-any-time thresholds for a married-filing-jointly couple living in the US to file Form 8938 for specified foreign financial assets?",
+      "expected_doc_numbers": ["Form 8938 Instructions"],
+      "expected_tax_year": null,
+      "ground_truth": "For US-resident MFJ filers, Form 8938 is required when the aggregate value of specified foreign financial assets exceeds $100,000 on the last day of the year or $150,000 at any time during the year."
+    },
+    {
+      "id": "case_14_eitc_qualifying_child_2024",
+      "question": "What residency, age, and joint-return restrictions must be satisfied for a child to be a 'qualifying child' for the 2024 Earned Income Tax Credit?",
+      "expected_doc_numbers": ["Publication 596", "Form 1040 Instructions"],
+      "expected_tax_year": 2024,
+      "ground_truth": "For the 2024 EITC, a qualifying child must live with the taxpayer in the US for more than half the year, be under 19 (under 24 if a full-time student) or any age if permanently disabled, and not file a joint return except to claim a refund."
+    },
+    {
+      "id": "case_15_section_1202_qsbs",
+      "question": "What ownership-holding-period and gross-asset requirements must be met for the Section 1202 qualified small business stock exclusion to apply?",
+      "expected_doc_numbers": ["Publication 550"],
+      "expected_tax_year": null,
+      "ground_truth": "Section 1202 requires that the stock be acquired at original issue from a domestic C corporation whose gross assets did not exceed $50 million at issuance, and that the taxpayer hold the stock for more than five years."
+    },
+    {
+      "id": "case_16_form_4562_section_179_2024",
+      "question": "What are the 2024 Section 179 expense limit and the investment-in-property phase-out threshold, and how are they reported on Form 4562?",
+      "expected_doc_numbers": ["Form 4562 Instructions"],
+      "expected_tax_year": 2024,
+      "ground_truth": "For 2024, the Section 179 maximum expense is $1,160,000 and it phases out dollar-for-dollar once qualifying property placed in service exceeds $2,890,000, reported in Part I of Form 4562."
+    },
+    {
+      "id": "case_17_clean_vehicle_credit_8936",
+      "question": "What two pricing limits and which buyer income caps apply to the 2024 Clean Vehicle Credit reported on Form 8936?",
+      "expected_doc_numbers": ["Form 8936 Instructions"],
+      "expected_tax_year": 2024,
+      "ground_truth": "For 2024, the Clean Vehicle Credit applies to vans, SUVs and pickups with MSRP up to $80,000 and other vehicles up to $55,000, with modified AGI caps of $300,000 MFJ, $225,000 head of household, and $150,000 single."
+    },
+    {
+      "id": "case_18_form_8283_appraisal",
+      "question": "When does a noncash charitable contribution require a qualified appraisal and Section B of Form 8283?",
+      "expected_doc_numbers": ["Form 8283 Instructions", "Publication 561"],
+      "expected_tax_year": null,
+      "ground_truth": "A qualified appraisal and Section B of Form 8283 are required when claiming a deduction of more than $5,000 ($10,000 for closely held stock) for a single item or group of similar items of noncash property."
+    },
+    {
+      "id": "case_19_pal_real_estate_professional",
+      "question": "What hours and material-participation tests does a taxpayer need to satisfy to be treated as a real estate professional and avoid passive activity loss limitations on rental real estate?",
+      "expected_doc_numbers": ["Publication 925"],
+      "expected_tax_year": null,
+      "ground_truth": "A taxpayer is treated as a real estate professional if more than half of their personal services and at least 750 hours during the year are performed in real property trades or businesses in which they materially participate."
+    },
+    {
+      "id": "case_20_innocent_spouse_8857",
+      "question": "What are the three relief categories a taxpayer may request on Form 8857, and which one has a strict two-year filing deadline?",
+      "expected_doc_numbers": ["Form 8857 Instructions"],
+      "expected_tax_year": null,
+      "ground_truth": "Form 8857 lets a spouse request innocent spouse relief, separation-of-liability relief, or equitable relief; separation-of-liability relief must be requested within two years of the IRS first beginning collection activity against the requesting spouse."
+    }
+  ]
+}

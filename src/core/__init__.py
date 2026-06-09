@@ -1,0 +1,33 @@
+"""Core domain primitives for TaxBot: configuration, models, persistence, retrieval, security."""
+
+from core.config import Settings, get_settings
+from core.errors import (
+    EmbeddingError,
+    IngestionError,
+    InjectionDetectedError,
+    OutputCitationError,
+    RetrievalError,
+    SecurityError,
+    SummarizationError,
+    TaxBotError,
+    UnstructuredParseError,
+    ValidationFailure,
+)
+from core.logging_config import configure_logging, get_logger
+
+__all__ = [
+    "EmbeddingError",
+    "IngestionError",
+    "InjectionDetectedError",
+    "OutputCitationError",
+    "RetrievalError",
+    "SecurityError",
+    "Settings",
+    "SummarizationError",
+    "TaxBotError",
+    "UnstructuredParseError",
+    "ValidationFailure",
+    "configure_logging",
+    "get_logger",
+    "get_settings",
+]
