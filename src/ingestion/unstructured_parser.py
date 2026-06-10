@@ -16,6 +16,7 @@ from unstructured_client.models import operations, shared
 from core.config import Settings, get_settings
 from core.errors import UnstructuredParseError
 from core.logging_config import get_logger
+from ingestion.narrative_filters import filter_irs_narratives
 
 logger = get_logger(__name__)
 
@@ -90,7 +91,15 @@ class UnstructuredParser:
                 elements = getattr(response, "elements", None)
                 if not elements:
                     raise UnstructuredParseError(f"No elements returned for {filename}")
-                return _elements_to_document(elements)
+                document = _elements_to_document(elements)
+                filtered_narratives = filter_irs_narratives(
+                    document.narratives,
+                    settings=self._settings,
+                )
+                return UnstructuredDocument(
+                    narratives=filtered_narratives,
+                    tables=document.tables,
+                )
         raise UnstructuredParseError(f"Unstructured partition exhausted retries for {filename}")
 
 

@@ -100,6 +100,13 @@ class Settings(BaseSettings):
         default="en",
         description="Comma-separated language tags to keep; '*' disables filtering.",
     )
+    narrative_content_filter_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable Layer 1 deterministic narrative hygiene: drop IRS print/proof "
+            "metadata and trailing index sections before parent/child chunking."
+        ),
+    )
 
     irs_request_throttle_seconds: float = Field(
         default=1.5,
