@@ -130,6 +130,23 @@ class Settings(BaseSettings):
         description="Closing fence used to delimit untrusted user input inside prompts.",
     )
 
+    retrieval_confidence_gate_enabled: bool = Field(
+        default=True,
+        description="Enable Layer 2 retrieval-confidence rejection for weak/off-topic matches.",
+    )
+    retrieval_min_hybrid_score: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=1.0,
+        description="Minimum hybrid_score required for the top-ranked retrieval hit.",
+    )
+    retrieval_min_score_gap: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Optional minimum top1-top2 hybrid_score gap; rejects ambiguous matches.",
+    )
+
     faithfulness_threshold: float = Field(default=0.92, ge=0.0, le=1.0)
     answer_relevancy_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     context_precision_threshold: float = Field(default=0.85, ge=0.0, le=1.0)

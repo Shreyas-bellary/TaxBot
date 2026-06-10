@@ -9,7 +9,9 @@ Pipeline order:
    ``child_nodes`` embeddings with a Postgres FTS keyword score. The hybrid
    ranking is ``0.75 * vector + 0.25 * fts`` and runs inside a single SQL
    statement to avoid round-trip overhead.
-3. **Parent expansion**: deduplicate by parent, fetch the verbatim parent
+3. **Layer 2 confidence gate**: reject weak/ambiguous retrievals from actual
+   ``hybrid_score`` values (no extra LLM call).
+4. **Parent expansion**: deduplicate by parent, fetch the verbatim parent
    markdown, and assemble a :class:`RetrievedContext` payload.
 
 The retrieved context is what the answer-generation stage actually sees.
@@ -19,13 +21,15 @@ from __future__ import annotations
 
 import re
 from collections import OrderedDict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from numbers import Real
 from uuid import UUID
 
 from pydantic import HttpUrl
 
 from core.config import Settings, get_settings
-from core.errors import RetrievalError
+from core.errors import OUT_OF_DOMAIN_MESSAGE, OutOfDomainQueryError, RetrievalError
 from core.logging_config import get_logger
 from core.models import ParentNode, RetrievedContext
 from core.repository import DocumentRepository
@@ -129,7 +133,12 @@ class HybridRetriever:
             or filters.form_number is not None
             or filters.doc_type is not None
         ):
-            logger.info("retrieval_filter_relaxation", filters=filters.__dict__)
+            logger.info(
+                "retrieval_filter_relaxation",
+                tax_year=filters.tax_year,
+                form_number=filters.form_number,
+                doc_type=filters.doc_type,
+            )
             rows = await self._repo.hybrid_retrieve(
                 query_text=query,
                 query_embedding=embedding,
@@ -141,6 +150,11 @@ class HybridRetriever:
 
         if not rows:
             raise RetrievalError("No matching child nodes for query")
+        assess_retrieval_confidence(
+            rows,
+            settings=self._settings,
+            query_preview=query[:120],
+        )
 
         parents: OrderedDict[UUID, ParentNode] = OrderedDict()
         matched_child_ids: list[UUID] = []
@@ -171,3 +185,52 @@ class HybridRetriever:
             matched_child_ids=tuple(matched_child_ids),
             source_urls=tuple(source_urls),
         )
+
+
+def assess_retrieval_confidence(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    settings: Settings,
+    query_preview: str,
+) -> None:
+    """Raise :class:`OutOfDomainQueryError` if retrieval confidence is weak."""
+
+    if not settings.retrieval_confidence_gate_enabled or not rows:
+        return
+
+    top_score = _coerce_hybrid_score(rows[0])
+    threshold = settings.retrieval_min_hybrid_score
+    if top_score < threshold:
+        logger.warning(
+            "retrieval_confidence_rejected",
+            reason="top_score_below_threshold",
+            top_score=top_score,
+            threshold=threshold,
+            query_preview=query_preview,
+        )
+        raise OutOfDomainQueryError(OUT_OF_DOMAIN_MESSAGE)
+
+    gap_threshold = settings.retrieval_min_score_gap
+    if gap_threshold is None or len(rows) < 2:
+        return
+
+    second_score = _coerce_hybrid_score(rows[1])
+    score_gap = top_score - second_score
+    if score_gap < gap_threshold:
+        logger.warning(
+            "retrieval_confidence_rejected",
+            reason="top2_gap_below_threshold",
+            top_score=top_score,
+            second_score=second_score,
+            score_gap=score_gap,
+            gap_threshold=gap_threshold,
+            query_preview=query_preview,
+        )
+        raise OutOfDomainQueryError(OUT_OF_DOMAIN_MESSAGE)
+
+
+def _coerce_hybrid_score(row: Mapping[str, object]) -> float:
+    value = row.get("hybrid_score")
+    if isinstance(value, Real):
+        return float(value)
+    raise RetrievalError("Retrieval row missing numeric hybrid_score")

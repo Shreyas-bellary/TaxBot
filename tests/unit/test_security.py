@@ -85,3 +85,5 @@ def test_output_guard_blocks_fence_leakage() -> None:
     )
     with pytest.raises(OutputCitationError):
         guard.validate(answer=raw, context=_ctx())
+
+

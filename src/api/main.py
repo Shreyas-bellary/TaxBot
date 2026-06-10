@@ -18,6 +18,7 @@ from core.config import Settings, get_settings
 from core.db import Database
 from core.errors import (
     InjectionDetectedError,
+    OutOfDomainQueryError,
     OutputCitationError,
     RetrievalError,
     SecurityError,
@@ -113,6 +114,14 @@ async def ask(
 ) -> AskResponse:
     try:
         result, context = await generator.answer_with_context(payload.query)
+    except OutOfDomainQueryError as exc:
+        return AskResponse(
+            answer=str(exc),
+            citations=[],
+            used_parent_ids=[],
+            parents=[],
+            matched_child_ids=[],
+        )
     except InjectionDetectedError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except OutputCitationError as exc:

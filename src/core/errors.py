@@ -44,5 +44,15 @@ class InjectionDetectedError(SecurityError):
     """Raised when a user input matches a known prompt-injection signature."""
 
 
+class OutOfDomainQueryError(SecurityError):
+    """Raised when a user query is outside TaxBot's tax-only scope."""
+
+
+OUT_OF_DOMAIN_MESSAGE = (
+    "I can only answer U.S. tax-related questions. "
+    "Please ask about IRS forms, filings, deductions, credits, tax years, or related topics."
+)
+
+
 class OutputCitationError(SecurityError):
     """Raised when an LLM output fails the provenance-citation alignment check."""
