@@ -4,40 +4,40 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ---------------------------------------------------------------------------
- * Design tokens — calm, financial-grade palette.
- * Light: warm near-white surfaces, soft gray borders, deep slate ink.
- * Dark: deep slate surfaces, muted borders, warm off-white ink.
+ * Design tokens
+ * Light: airy blue-tinted surfaces with soft, seamless shade steps.
+ * Dark: true black neutrals — no blue cast on backgrounds.
  * ------------------------------------------------------------------------- */
 :root {
-  --bg: #faf9f7;
-  --surface: #ffffff;
-  --surface-2: #f2f0ec;
-  --border: #e5e2dc;
-  --border-strong: #d3cfc7;
-  --ink: #1f1e1a;
-  --ink-muted: #6f6b62;
-  --ink-faint: #98948a;
-  --accent: #2f5aa8;
-  --accent-hover: #264b8e;
-  --accent-soft: #eaf0fa;
-  --user-bubble: #f0eee9;
-  --danger: #b3422f;
+  --bg: #f2f7fd;
+  --surface: #f8fbff;
+  --surface-2: #e9f2fb;
+  --border: #dce8f4;
+  --border-strong: #c8daee;
+  --ink: #152238;
+  --ink-muted: #4d6680;
+  --ink-faint: #7a93ad;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: #dfeafb;
+  --user-bubble: #e3eef9;
+  --danger: #d14335;
 }
 
 .dark {
-  --bg: #16181d;
-  --surface: #1d2026;
-  --surface-2: #23262e;
-  --border: #2b2f38;
-  --border-strong: #3a3f4a;
-  --ink: #e8e6e1;
-  --ink-muted: #a09d94;
-  --ink-faint: #75726a;
-  --accent: #8ab0f0;
-  --accent-hover: #a5c3f5;
-  --accent-soft: #232c3d;
-  --user-bubble: #262a33;
-  --danger: #e08573;
+  --bg: #000000;
+  --surface: #0a0a0a;
+  --surface-2: #141414;
+  --border: #1f1f1f;
+  --border-strong: #2e2e2e;
+  --ink: #f5f5f5;
+  --ink-muted: #a3a3a3;
+  --ink-faint: #6b6b6b;
+  --accent: #f5f5f5;
+  --accent-hover: #e5e5e5;
+  --accent-soft: #1a1a1a;
+  --user-bubble: #161616;
+  --danger: #f07066;
 }
 
 @theme inline {
@@ -245,4 +245,67 @@ body {
 
 .anchor-flash {
   animation: anchor-flash 1.6s ease-out;
+}
+
+/* Welcome screen entrance. */
+@keyframes welcome-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.welcome-enter {
+  animation: welcome-enter 0.5s ease-out both;
+}
+
+/* Suggested question links above the input bar. */
+@keyframes suggestion-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.suggestion-link {
+  animation: suggestion-enter 0.35s ease-out both;
+}
+
+.disclaimer-fade {
+  animation: suggestion-enter 0.35s ease-out both;
+}
+
+.sidebar-btn {
+  outline: none;
+}
+
+.sidebar-btn:focus {
+  outline: none;
+}
+
+.sidebar-btn:focus-visible {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.composer-dock {
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-enter,
+  .suggestion-link,
+  .disclaimer-fade,
+  .sidebar-panel,
+  .composer-dock {
+    animation: none !important;
+    transition: none !important;
+  }
 }

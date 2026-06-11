@@ -1,20 +1,17 @@
 import {
   Landmark,
-  Monitor,
-  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
-  Sun,
   Trash2,
 } from "lucide-react";
 
 import type { ChatGroup } from "../hooks/useChats";
-import { useTheme, type ThemePreference } from "../theme/context";
 
 interface SidebarProps {
   groups: ChatGroup[];
   activeChatId: string | null;
+  isDraft: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onNewChat: () => void;
@@ -22,84 +19,89 @@ interface SidebarProps {
   onDeleteChat: (id: string) => void;
 }
 
-const THEME_ICONS: Record<ThemePreference, typeof Sun> = {
-  light: Sun,
-  dark: Moon,
-  system: Monitor,
-};
-
-const THEME_LABELS: Record<ThemePreference, string> = {
-  light: "Light theme",
-  dark: "Dark theme",
-  system: "System theme",
-};
-
 export function Sidebar({
   groups,
   activeChatId,
+  isDraft,
   collapsed,
   onToggleCollapsed,
   onNewChat,
   onSelectChat,
   onDeleteChat,
 }: SidebarProps) {
-  const { preference, cycle } = useTheme();
-  const ThemeIcon = THEME_ICONS[preference];
-
-  if (collapsed) {
-    return (
-      <aside className="flex h-full w-12 shrink-0 flex-col items-center gap-2 border-r border-border bg-surface py-3">
+  return (
+    <aside
+      className={`sidebar-panel flex h-full shrink-0 flex-col overflow-hidden border-r border-border bg-surface transition-[width] duration-300 ease-in-out ${
+        collapsed ? "w-[52px]" : "w-64"
+      }`}
+    >
+      <div
+        className={`flex shrink-0 items-center py-4 transition-all duration-300 ease-in-out ${
+          collapsed ? "justify-center px-0" : "justify-between px-4"
+        }`}
+      >
+        <div
+          className={`flex items-center gap-2.5 overflow-hidden transition-all duration-300 ease-in-out ${
+            collapsed ? "w-0 opacity-0" : "w-auto opacity-100"
+          }`}
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+            <Landmark size={17} strokeWidth={1.75} />
+          </span>
+          <span className="whitespace-nowrap text-[18px] font-semibold tracking-[-0.02em] text-ink">
+            TaxBot
+          </span>
+        </div>
         <button
           type="button"
-          onClick={onToggleCollapsed}
-          aria-label="Open sidebar"
-          className="rounded-lg p-2 text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          onClick={(event) => {
+            onToggleCollapsed();
+            event.currentTarget.blur();
+          }}
+          aria-label={collapsed ? "Open sidebar" : "Collapse sidebar"}
+          className="sidebar-btn shrink-0 rounded-lg p-1.5 text-ink-faint transition-colors duration-200 hover:bg-surface-2 hover:text-ink"
         >
-          <PanelLeftOpen size={18} />
+          {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={17} />}
         </button>
+      </div>
+
+      <div
+        className={`shrink-0 px-3 pb-2 transition-all duration-300 ease-in-out ${
+          collapsed ? "px-2" : ""
+        }`}
+      >
         <button
           type="button"
           onClick={onNewChat}
           aria-label="New chat"
-          className="rounded-lg p-2 text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          aria-current={isDraft ? "page" : undefined}
+          title={collapsed ? "New chat" : undefined}
+          className={`sidebar-btn relative flex w-full items-center rounded-lg text-sm transition-colors duration-200 ${
+            collapsed ? "justify-center p-2" : "gap-2 px-3 py-2"
+          } ${
+            isDraft
+              ? "bg-surface-2 font-medium text-ink"
+              : "font-medium text-ink hover:bg-surface-2"
+          }`}
         >
-          <Plus size={18} />
-        </button>
-      </aside>
-    );
-  }
-
-  return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-border bg-surface">
-      <div className="flex items-center justify-between px-4 py-3.5">
-        <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent-soft text-accent">
-            <Landmark size={15} />
-          </span>
-          <span className="text-[15px] font-semibold tracking-tight">TaxBot</span>
-        </div>
-        <button
-          type="button"
-          onClick={onToggleCollapsed}
-          aria-label="Collapse sidebar"
-          className="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink"
-        >
-          <PanelLeftClose size={17} />
+          {isDraft && !collapsed && (
+            <span
+              aria-hidden
+              className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent"
+            />
+          )}
+          <Plus size={16} className="shrink-0 text-ink-muted" />
+          {!collapsed && <span className="whitespace-nowrap">New chat</span>}
         </button>
       </div>
 
-      <div className="px-3 pb-2">
-        <button
-          type="button"
-          onClick={onNewChat}
-          className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-ink transition-colors hover:border-border-strong hover:bg-surface-2"
-        >
-          <Plus size={16} className="text-ink-muted" />
-          New chat
-        </button>
-      </div>
-
-      <nav className="flex-1 overflow-y-auto px-2 pb-2" aria-label="Chat history">
+      <nav
+        className={`min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-2 transition-opacity duration-300 ${
+          collapsed ? "pointer-events-none opacity-0" : "opacity-100"
+        }`}
+        aria-label="Chat history"
+        aria-hidden={collapsed}
+      >
         {groups.length === 0 ? (
           <p className="px-3 pt-6 text-center text-[13px] leading-relaxed text-ink-faint">
             No conversations yet.
@@ -120,7 +122,7 @@ export function Sidebar({
                       <button
                         type="button"
                         onClick={() => onSelectChat(chat.id)}
-                        className={`relative flex w-full items-center rounded-lg py-2 pl-3 pr-8 text-left text-[13.5px] transition-colors ${
+                        className={`relative flex w-full items-center rounded-lg py-2 pl-3 pr-8 text-left text-[13.5px] transition-all duration-200 ${
                           active
                             ? "bg-surface-2 font-medium text-ink"
                             : "text-ink-muted hover:bg-surface-2 hover:text-ink"
@@ -129,7 +131,7 @@ export function Sidebar({
                         {active && (
                           <span
                             aria-hidden
-                            className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent"
+                            className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent transition-all duration-200"
                           />
                         )}
                         <span className="truncate">{chat.title}</span>
@@ -138,7 +140,7 @@ export function Sidebar({
                         type="button"
                         onClick={() => onDeleteChat(chat.id)}
                         aria-label={`Delete chat: ${chat.title}`}
-                        className="absolute right-1.5 top-1/2 hidden -translate-y-1/2 rounded-md p-1 text-ink-faint transition-colors hover:text-danger group-hover:block"
+                        className="absolute right-1.5 top-1/2 hidden -translate-y-1/2 rounded-md p-1 text-ink-faint transition-colors duration-200 hover:text-danger group-hover:block"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -150,20 +152,6 @@ export function Sidebar({
           ))
         )}
       </nav>
-
-      <div className="border-t border-border px-3 py-2.5">
-        <button
-          type="button"
-          onClick={cycle}
-          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
-        >
-          <ThemeIcon size={15} />
-          {THEME_LABELS[preference]}
-        </button>
-        <p className="mt-1.5 px-2.5 text-[11px] leading-snug text-ink-faint">
-          History is stored locally — nothing is saved on our servers.
-        </p>
-      </div>
     </aside>
   );
 }

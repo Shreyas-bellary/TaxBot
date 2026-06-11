@@ -43,7 +43,7 @@ export async function ask(query: string): Promise<AskResponse> {
     });
   } catch {
     throw new AskError(
-      "I couldn't reach the TaxBot service. Check that the API is running, then try again.",
+      "I couldn't reach the TaxBot service at the moment. Please try again later.",
       null,
     );
   }

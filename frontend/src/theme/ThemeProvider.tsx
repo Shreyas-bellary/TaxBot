@@ -6,50 +6,31 @@ const THEME_KEY = "taxbot.theme.v1";
 
 function readPreference(): ThemePreference {
   const stored = localStorage.getItem(THEME_KEY);
-  return stored === "light" || stored === "dark" ? stored : "system";
-}
-
-function systemIsDark(): boolean {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return stored === "light" || stored === "dark" ? stored : "dark";
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [preference, setPreferenceState] =
-    useState<ThemePreference>(readPreference);
-  const [systemDark, setSystemDark] = useState<boolean>(systemIsDark);
+  const [preference, setPreferenceState] = useState<ThemePreference>(readPreference);
 
-  const resolved: "light" | "dark" =
-    preference === "system" ? (systemDark ? "dark" : "light") : preference;
-
-  // Sync the resolved theme to the <html> class (external system).
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", resolved === "dark");
-  }, [resolved]);
-
-  // Subscribe to OS theme changes.
-  useEffect(() => {
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => setSystemDark(media.matches);
-    media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
-  }, []);
+    document.documentElement.classList.toggle("dark", preference === "dark");
+  }, [preference]);
 
   const setPreference = useCallback((next: ThemePreference) => {
     localStorage.setItem(THEME_KEY, next);
     setPreferenceState(next);
   }, []);
 
-  const cycle = useCallback(() => {
-    const order: ThemePreference[] = ["light", "dark", "system"];
+  const toggle = useCallback(() => {
     setPreferenceState((current) => {
-      const next = order[(order.indexOf(current) + 1) % order.length];
+      const next: ThemePreference = current === "dark" ? "light" : "dark";
       localStorage.setItem(THEME_KEY, next);
       return next;
     });
   }, []);
 
   return (
-    <ThemeContext.Provider value={{ preference, resolved, setPreference, cycle }}>
+    <ThemeContext.Provider value={{ preference, setPreference, toggle }}>
       {children}
     </ThemeContext.Provider>
   );

@@ -1,13 +1,11 @@
 import { createContext, useContext } from "react";
 
-export type ThemePreference = "light" | "dark" | "system";
+export type ThemePreference = "light" | "dark";
 
 export interface ThemeContextValue {
   preference: ThemePreference;
-  /** The theme actually applied right now (system resolved). */
-  resolved: "light" | "dark";
+  toggle: () => void;
   setPreference: (preference: ThemePreference) => void;
-  cycle: () => void;
 }
 
 export const ThemeContext = createContext<ThemeContextValue | null>(null);

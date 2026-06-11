@@ -3,7 +3,7 @@
 Runs on a GitHub Actions cron at 00:00 UTC. The behaviour is identical to
 the backfill except that:
 
-  * The scraper sorts by ``revision_date_desc`` so freshly revised
+  * The scraper sorts by ``posted_date_desc`` so the most recently posted
     documents appear first. As soon as we encounter records that already
     match Supabase state on both metadata and PDF hash, we short-circuit.
   * We reprocess a document if **either** its listing metadata changed
@@ -36,7 +36,7 @@ from ingestion.unstructured_parser import UnstructuredParser
 logger = get_logger(__name__)
 
 # Number of consecutive "unchanged" rows that triggers an early exit when
-# scraping in revision-desc order.
+# scraping in posted-date-desc order.
 _UNCHANGED_STREAK_LIMIT = 50
 
 
@@ -74,7 +74,7 @@ async def run_delta(
         unchanged_streak = 0
 
         async for metadata in scraper.iter_documents(
-            sort="revision_date_desc",
+            sort="posted_date_desc",
             drop_multilingual=True,
             max_pages=max_pages,
         ):

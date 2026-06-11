@@ -37,8 +37,8 @@ _DEFAULT_PARAMS: dict[str, str] = {
     "items_per_page": "200",
 }
 
-# Sort options exposed by the Views API. ``revision_date_desc`` is used by the
-# nightly delta job to fetch freshly revised documents first and short-circuit
+# Sort options exposed by the Views API. ``posted_date_desc`` is used by the
+# nightly delta job to fetch freshly posted documents first and short-circuit
 # the page loop the moment we encounter records we already have.
 _SORT_PARAMS: dict[str, dict[str, str]] = {
     "natural": {},

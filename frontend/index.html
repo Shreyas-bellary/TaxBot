@@ -13,10 +13,7 @@
       (function () {
         try {
           var pref = localStorage.getItem("taxbot.theme.v1");
-          var dark =
-            pref === "dark" ||
-            ((pref === null || pref === "system") &&
-              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          var dark = pref !== "light";
           if (dark) document.documentElement.classList.add("dark");
         } catch (e) {}
       })();
