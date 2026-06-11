@@ -126,6 +126,7 @@ def _make_gemini_summarizer(settings: Settings) -> SummarizeFn:
                 temperature=0.0,
                 max_output_tokens=400,
                 response_mime_type="text/plain",
+                thinking_config=genai_types.ThinkingConfig(thinking_level=genai_types.ThinkingLevel.MINIMAL)
             ),
         )
         text = getattr(response, "text", "") or ""

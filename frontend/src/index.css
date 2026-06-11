@@ -1,0 +1,248 @@
+@import "tailwindcss";
+
+/* Class-strategy dark mode: `.dark` on <html> activates the dark: variant. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+ * Design tokens — calm, financial-grade palette.
+ * Light: warm near-white surfaces, soft gray borders, deep slate ink.
+ * Dark: deep slate surfaces, muted borders, warm off-white ink.
+ * ------------------------------------------------------------------------- */
+:root {
+  --bg: #faf9f7;
+  --surface: #ffffff;
+  --surface-2: #f2f0ec;
+  --border: #e5e2dc;
+  --border-strong: #d3cfc7;
+  --ink: #1f1e1a;
+  --ink-muted: #6f6b62;
+  --ink-faint: #98948a;
+  --accent: #2f5aa8;
+  --accent-hover: #264b8e;
+  --accent-soft: #eaf0fa;
+  --user-bubble: #f0eee9;
+  --danger: #b3422f;
+}
+
+.dark {
+  --bg: #16181d;
+  --surface: #1d2026;
+  --surface-2: #23262e;
+  --border: #2b2f38;
+  --border-strong: #3a3f4a;
+  --ink: #e8e6e1;
+  --ink-muted: #a09d94;
+  --ink-faint: #75726a;
+  --accent: #8ab0f0;
+  --accent-hover: #a5c3f5;
+  --accent-soft: #232c3d;
+  --user-bubble: #262a33;
+  --danger: #e08573;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-user-bubble: var(--user-bubble);
+  --color-danger: var(--danger);
+
+  --font-sans:
+    ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg text-ink font-sans antialiased;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* Slim, theme-aware scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+/* ---------------------------------------------------------------------------
+ * Markdown rendering for dense tax content.
+ * ------------------------------------------------------------------------- */
+.markdown {
+  @apply text-ink;
+}
+
+.markdown > *:first-child {
+  margin-top: 0;
+}
+
+.markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown p {
+  margin: 0.75em 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.4em 0 0.5em;
+}
+
+.markdown h1 {
+  font-size: 1.25em;
+}
+
+.markdown h2 {
+  font-size: 1.15em;
+}
+
+.markdown h3,
+.markdown h4 {
+  font-size: 1.05em;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0.75em 0;
+  padding-left: 1.5em;
+}
+
+.markdown ul {
+  list-style: disc;
+}
+
+.markdown ol {
+  list-style: decimal;
+}
+
+.markdown li {
+  margin: 0.3em 0;
+}
+
+.markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+
+.markdown a:hover {
+  color: var(--accent-hover);
+}
+
+.markdown code {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.875em;
+}
+
+.markdown pre {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.markdown pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.markdown blockquote {
+  border-left: 3px solid var(--border-strong);
+  padding-left: 1em;
+  margin: 0.75em 0;
+  color: var(--ink-muted);
+}
+
+.markdown table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  width: 100%;
+  font-size: 0.925em;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5em 0;
+}
+
+/* Thinking indicator dots. */
+@keyframes pulse-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.thinking-dot {
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.thinking-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.thinking-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* Brief highlight when a source card is anchored in the drawer. */
+@keyframes anchor-flash {
+  0% {
+    background: var(--accent-soft);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.anchor-flash {
+  animation: anchor-flash 1.6s ease-out;
+}

@@ -36,7 +36,7 @@ class HuggingFaceEmbedder:
         self._settings = settings or get_settings()
         token = self._settings.huggingface_api_token.get_secret_value()
         self._client = httpx.AsyncClient(
-            base_url="https://api-inference.huggingface.co",
+            base_url="https://router.huggingface.co/hf-inference",
             timeout=self._settings.irs_request_timeout_seconds,
             headers={
                 "Authorization": f"Bearer {token}",

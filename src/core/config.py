@@ -126,6 +126,11 @@ class Settings(BaseSettings):
         description="Bounded retry budget for transient IRS HTTP failures.",
     )
 
+    cors_allow_origins: str = Field(
+        default="http://localhost:5173",
+        description="Comma-separated browser origins allowed to call the API.",
+    )
+
     user_query_start_tag: str = Field(
         default="USER_QUERY_START_5f3c1e",
         min_length=8,
@@ -166,6 +171,16 @@ class Settings(BaseSettings):
     @classmethod
     def _normalise_language_allowlist(cls, value: str) -> str:
         return value.strip().lower()
+
+    @property
+    def cors_origins(self) -> tuple[str, ...]:
+        """Parsed list of allowed CORS origins."""
+
+        return tuple(
+            origin.strip()
+            for origin in self.cors_allow_origins.split(",")
+            if origin.strip()
+        )
 
     @property
     def language_tags(self) -> frozenset[str]:

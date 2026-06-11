@@ -1,4 +1,4 @@
-.PHONY: install lint type test test-cov backfill delta migrate evaluate
+.PHONY: install lint type test test-cov backfill delta migrate evaluate api frontend-install frontend-dev frontend-build
 
 install:
 	poetry install --with dev
@@ -29,3 +29,15 @@ delta:
 
 evaluate:
 	poetry run taxbot-evaluate
+
+api:
+	poetry run uvicorn api.main:app --app-dir src --reload --port 8000
+
+frontend-install:
+	cd frontend && npm install
+
+frontend-dev:
+	cd frontend && npm run dev
+
+frontend-build:
+	cd frontend && npm run build

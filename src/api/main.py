@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from core.config import Settings, get_settings
@@ -77,6 +78,12 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(get_settings().cors_origins),
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 class AskRequest(BaseModel):
     """Free-form user question."""
