@@ -20,8 +20,13 @@ from tenacity import (
 )
 
 from core.config import Settings, get_settings
-from core.errors import IngestionError
+from core.errors import IngestionError, UnsupportedPDFError
 from core.logging_config import get_logger
+
+# Sentinel text present in XFA/AcroForm stub PDFs that require Adobe Reader.
+# The bytes check covers both plain-text "PDFs" and real PDFs that embed this
+# error string in their page content stream.
+_ADOBE_READER_REQUIRED_MARKER = b"requires Adobe Reader"
 
 logger = get_logger(__name__)
 
@@ -75,6 +80,11 @@ class PDFFetcher:
                 payload = response.content
                 if not payload:
                     raise IngestionError(f"Empty PDF payload from {url}")
+                if _ADOBE_READER_REQUIRED_MARKER in payload[:4096]:
+                    raise UnsupportedPDFError(
+                        f"PDF at {url} is an XFA/AcroForm stub that requires Adobe Reader "
+                        "and contains no parseable content — skipping."
+                    )
                 digest = hashlib.sha256(payload).hexdigest()
                 logger.info(
                     "pdf_fetched",

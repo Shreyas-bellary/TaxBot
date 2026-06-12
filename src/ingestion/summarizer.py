@@ -57,6 +57,17 @@ _MAX_SUMMARY_CHARS = 1500
 _GEMINI_RETRYABLE_CODES: frozenset[int] = frozenset({429, 500, 503})
 
 
+def _parse_retry_delay(exc: genai_errors.APIError) -> float | None:
+    """Return retry delay seconds from Gemini RetryInfo."""
+    error_body = exc.details
+    if not isinstance(error_body, dict):
+        return None
+    for item in error_body.get("error", {}).get("details", ()):
+        if isinstance(item, dict) and "retryDelay" in item:
+            return float(str(item["retryDelay"]).removesuffix("s"))
+    return None
+
+
 def _is_gemini_retryable(exc: BaseException) -> bool:
     """Return True for transient Gemini errors (rate-limit, server errors)."""
     if isinstance(exc, genai_errors.APIError):
@@ -142,31 +153,38 @@ def _make_gemini_summarizer(settings: Settings) -> SummarizeFn:
             wait=wait_exponential(multiplier=2.0, min=4.0, max=retry_max_wait),
             retry=retry_if_exception(_is_gemini_retryable),
             reraise=True,
-            before_sleep=lambda rs: logger.warning(
-                "gemini_summarizer_retrying",
-                attempt=rs.attempt_number,
-                wait_seconds=round(rs.next_action.sleep, 1) if rs.next_action else None,
-                doc_number=payload.doc_number,
-                error=str(rs.outcome.exception()) if rs.outcome else None,
-            ),
         ):
             with attempt:
-                response = await client.aio.models.generate_content(
-                    model=model_id,
-                    contents=prompt,
-                    config=genai_types.GenerateContentConfig(
-                        temperature=0.0,
-                        max_output_tokens=400,
-                        response_mime_type="text/plain",
-                        thinking_config=genai_types.ThinkingConfig(
-                            thinking_level=genai_types.ThinkingLevel.MINIMAL
+                try:
+                    response = await client.aio.models.generate_content(
+                        model=model_id,
+                        contents=prompt,
+                        config=genai_types.GenerateContentConfig(
+                            temperature=0.0,
+                            max_output_tokens=400,
+                            response_mime_type="text/plain",
+                            thinking_config=genai_types.ThinkingConfig(
+                                thinking_level=genai_types.ThinkingLevel.MINIMAL
+                            ),
                         ),
-                    ),
-                )
-                text = getattr(response, "text", "") or ""
-                if not text.strip():
-                    raise SummarizationError("Gemini returned empty completion")
-                return text.strip()
+                    )
+                    text = getattr(response, "text", "") or ""
+                    if not text.strip():
+                        raise SummarizationError("Gemini returned empty completion")
+                    return text.strip()
+                except genai_errors.APIError as exc:
+                    if getattr(exc, "code", None) == 429:
+                        api_delay = _parse_retry_delay(exc)
+                        if api_delay is not None:
+                            wait = api_delay * 1.1
+                            logger.warning(
+                                "gemini_rate_limit_waiting",
+                                doc_number=payload.doc_number,
+                                api_delay_seconds=api_delay,
+                                wait_seconds=round(wait, 1),
+                            )
+                            await asyncio.sleep(wait)
+                    raise
         raise SummarizationError("Gemini summarizer exhausted retries")  # pragma: no cover
 
     return _summarize

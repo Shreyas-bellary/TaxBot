@@ -15,6 +15,7 @@ from typing import NoReturn
 
 from core.config import Settings, get_settings
 from core.db import Database
+from core.errors import UnsupportedPDFError
 from core.logging_config import configure_logging, get_logger
 from core.models import IRSDocumentMetadata, IRSDocumentRecord
 from core.repository import DocumentRepository
@@ -44,6 +45,7 @@ async def run_backfill(
         "scraped": 0,
         "filtered_window": 0,
         "filtered_existing": 0,
+        "filtered_unsupported": 0,
         "ingested": 0,
         "failed": 0,
     }
@@ -85,6 +87,14 @@ async def run_backfill(
                             pipeline=pipeline,
                         )
                         counts["ingested"] += 1
+                    except UnsupportedPDFError as exc:
+                        counts["filtered_unsupported"] += 1
+                        logger.warning(
+                            "backfill_pdf_unsupported_skipped",
+                            doc_number=metadata.doc_number,
+                            pdf_url=str(metadata.pdf_url),
+                            reason=str(exc),
+                        )
                     except Exception as exc:
                         counts["failed"] += 1
                         logger.error(

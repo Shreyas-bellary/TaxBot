@@ -149,12 +149,20 @@ class Settings(BaseSettings):
         ),
     )
     table_summary_concurrency: int = Field(
-        default=4,
+        default=1,
         ge=1,
         le=32,
         description=(
             "Maximum simultaneous Gemini table-summary calls across all in-flight documents. "
-            "Reduce to 1-2 when hitting Gemini free-tier rate limits during backfill."
+        ),
+    )
+    qdrant_upsert_batch_size: int = Field(
+        default=100,
+        ge=10,
+        le=1000,
+        description=(
+            "Maximum number of Qdrant points sent in a single upsert request. "
+            "Large publications can produce 500+ child nodes; batching avoids timeouts."
         ),
     )
 

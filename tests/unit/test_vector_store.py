@@ -6,7 +6,9 @@ that can be exercised without a live Qdrant cluster.
 
 from __future__ import annotations
 
-from core.vector_store import _build_metadata_filter
+from qdrant_client import models
+
+from core.vector_store import _PAYLOAD_INDEXES, _build_metadata_filter
 
 
 def test_filter_all_none_returns_none() -> None:
@@ -40,3 +42,11 @@ def test_filter_form_number_only() -> None:
     assert result is not None
     assert len(result.must) == 1  # type: ignore[arg-type]
     assert result.must[0].key == "form_number"  # type: ignore[index]
+
+
+def test_payload_indexes_cover_filter_and_delete_fields() -> None:
+    indexed = {name for name, _ in _PAYLOAD_INDEXES}
+    assert indexed == {"doc_id", "form_number", "doc_type", "tax_year"}
+    schema_by_field = dict(_PAYLOAD_INDEXES)
+    assert schema_by_field["doc_id"] == models.PayloadSchemaType.KEYWORD
+    assert schema_by_field["tax_year"] == models.PayloadSchemaType.INTEGER

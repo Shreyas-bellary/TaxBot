@@ -22,6 +22,7 @@ from typing import Any, NoReturn
 
 from core.config import Settings, get_settings
 from core.db import Database
+from core.errors import UnsupportedPDFError
 from core.logging_config import configure_logging, get_logger
 from core.models import IRSDocumentMetadata, IRSDocumentRecord
 from core.repository import DocumentRepository
@@ -58,6 +59,7 @@ async def run_delta(
         "metadata_changed": 0,
         "hash_changed": 0,
         "new_documents": 0,
+        "filtered_unsupported": 0,
         "ingested": 0,
         "failed": 0,
     }
@@ -100,7 +102,17 @@ async def run_delta(
 
                 if existing is not None and not metadata_diff:
                     # Need to verify PDF hash before we can declare "unchanged".
-                    fetched = await pdf_fetcher.fetch(str(metadata.pdf_url))
+                    try:
+                        fetched = await pdf_fetcher.fetch(str(metadata.pdf_url))
+                    except UnsupportedPDFError as exc:
+                        counts["filtered_unsupported"] += 1
+                        logger.warning(
+                            "delta_pdf_unsupported_skipped",
+                            doc_number=metadata.doc_number,
+                            pdf_url=str(metadata.pdf_url),
+                            reason=str(exc),
+                        )
+                        continue
                     if existing.get("pdf_sha256") == fetched.sha256:
                         counts["unchanged"] += 1
                         unchanged_streak += 1
@@ -142,6 +154,14 @@ async def run_delta(
                         pipeline=pipeline,
                     )
                     counts["ingested"] += 1
+                except UnsupportedPDFError as exc:
+                    counts["filtered_unsupported"] += 1
+                    logger.warning(
+                        "delta_pdf_unsupported_skipped",
+                        doc_number=metadata.doc_number,
+                        pdf_url=str(metadata.pdf_url),
+                        reason=str(exc),
+                    )
                 except Exception as exc:
                     counts["failed"] += 1
                     logger.error(

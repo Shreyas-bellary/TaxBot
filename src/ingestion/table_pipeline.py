@@ -20,11 +20,11 @@ to keep Postgres and Qdrant consistent:
 3. ``vector_store.delete_by_doc_id(doc_id)`` removes all matching Qdrant
    points.
 4. New parents + children are written to Postgres, then upserted to Qdrant.
-5. **Rollback on Qdrant failure**: if the Qdrant upsert fails after Postgres
-   writes succeed, the pipeline deletes the freshly written Postgres rows
-   (``delete_nodes_for_document``) and the Qdrant points (best-effort), then
-   re-raises the exception.  This leaves both stores in the pre-ingest state,
-   which is equivalent to a failed fresh ingest for a backfill retry.
+5. ``mark_processed`` is stamped only **after** the Qdrant upsert succeeds.
+6. **Rollback on Qdrant failure**: if the Qdrant upsert fails, the pipeline
+   deletes the freshly written Postgres rows and clears ``processed_at``
+   (best-effort), then re-raises. The next backfill run will treat this
+   document as unprocessed and attempt a full re-ingest.
 """
 
 from __future__ import annotations
@@ -213,7 +213,6 @@ class TablePipeline:
         all_parents = [*parents_to_insert, *table_parents]
         await self._persist_parents(all_parents)
         children_inserted = await self._repo.insert_children(all_children)
-        await self._repo.mark_processed(doc_id)
 
         if all_children:
             try:
@@ -228,12 +227,16 @@ class TablePipeline:
                 logger.error(
                     "qdrant_upsert_failed_rolling_back",
                     doc_id=str(doc_id),
-                    error=str(exc),
+                    error=repr(exc),
                 )
                 await self._repo.delete_nodes_for_document(doc_id)
                 with contextlib.suppress(Exception):
                     await self._vector_store.delete_by_doc_id(doc_id)
+                with contextlib.suppress(Exception):
+                    await self._repo.unmark_processed(doc_id)
                 raise
+
+        await self._repo.mark_processed(doc_id)
 
         report = IngestionReport(
             doc_id=doc_id,

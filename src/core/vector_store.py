@@ -5,7 +5,7 @@ and provides the three operations the ingestion pipeline and retrieval layer
 need:
 
 - :meth:`ensure_collection` — create the collection (dense + sparse vectors)
-  if it does not already exist.
+  and payload indexes if they do not already exist.
 - :meth:`upsert_points` — write a batch of child-node vectors with metadata
   payload.
 - :meth:`hybrid_search` — prefetch dense + sparse candidates and fuse with
@@ -30,6 +30,13 @@ logger = get_logger(__name__)
 
 _DENSE_NAME = "dense"
 _SPARSE_NAME = "sparse"
+
+_PAYLOAD_INDEXES: tuple[tuple[str, models.PayloadSchemaType], ...] = (
+    ("doc_id", models.PayloadSchemaType.KEYWORD),
+    ("form_number", models.PayloadSchemaType.KEYWORD),
+    ("doc_type", models.PayloadSchemaType.KEYWORD),
+    ("tax_year", models.PayloadSchemaType.INTEGER),
+)
 
 
 def _build_metadata_filter(
@@ -106,7 +113,7 @@ class QdrantVectorStore:
     # ------------------------------------------------------------------
 
     async def ensure_collection(self) -> None:
-        """Create the Qdrant collection if it does not exist.
+        """Create the Qdrant collection and payload indexes if it doesn't exist.
 
         Idempotent — safe to call on every startup.
         """
@@ -135,6 +142,33 @@ class QdrantVectorStore:
         else:
             logger.info("qdrant_collection_ready", collection=collection_name)
 
+        await self._ensure_payload_indexes(collection_name)
+
+    async def _ensure_payload_indexes(self, collection_name: str) -> None:
+        """Create payload indexes required for filtered delete and search."""
+        for field_name, field_schema in _PAYLOAD_INDEXES:
+            try:
+                await self._client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name=field_name,
+                    field_schema=field_schema,
+                )
+                logger.info(
+                    "qdrant_payload_index_created",
+                    collection=collection_name,
+                    field=field_name,
+                )
+            except Exception as exc:
+                # Index already exists on re-runs / existing collections.
+                if "already exists" in str(exc).lower():
+                    logger.debug(
+                        "qdrant_payload_index_exists",
+                        collection=collection_name,
+                        field=field_name,
+                    )
+                    continue
+                raise
+
     async def aclose(self) -> None:
         await self._client.close()
 
@@ -151,10 +185,12 @@ class QdrantVectorStore:
         payloads: Sequence[dict[str, Any]],
         doc_id: str,
     ) -> None:
-        """Upsert a batch of child-node points into Qdrant.
+        """Upsert child-node points into Qdrant in bounded batches.
 
         ``child_ids``, ``dense_vectors``, ``sparse_vectors``, and ``payloads``
-        must all have the same length.
+        must all have the same length. Points are sent in batches of
+        ``qdrant_upsert_batch_size`` to avoid request-size timeouts on large
+        docs.
         """
         points = [
             models.PointStruct(
@@ -172,16 +208,23 @@ class QdrantVectorStore:
         if not points:
             return
 
-        await self._client.upsert(
-            collection_name=self._settings.qdrant_collection,
-            points=points,
-        )
-        logger.info(
-            "qdrant_upsert",
-            count=len(points),
-            doc_id=doc_id,
-            collection=self._settings.qdrant_collection,
-        )
+        batch_size = self._settings.qdrant_upsert_batch_size
+        collection = self._settings.qdrant_collection
+        total = len(points)
+        for start in range(0, total, batch_size):
+            batch = points[start : start + batch_size]
+            await self._client.upsert(
+                collection_name=collection,
+                points=batch,
+            )
+            logger.info(
+                "qdrant_upsert",
+                batch_start=start,
+                batch_count=len(batch),
+                total=total,
+                doc_id=doc_id,
+                collection=collection,
+            )
 
     async def delete_by_doc_id(self, doc_id: str | UUID) -> None:
         """Delete all points whose payload ``doc_id`` equals the given value."""

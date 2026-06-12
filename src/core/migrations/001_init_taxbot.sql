@@ -55,19 +55,6 @@ CREATE TABLE IF NOT EXISTS parent_nodes (
 CREATE INDEX IF NOT EXISTS parent_nodes_doc_id_idx
     ON parent_nodes (doc_id);
 
--- Metadata pre-filters used by stage 1 of the hybrid retriever.
-CREATE INDEX IF NOT EXISTS parent_nodes_tax_year_idx
-    ON parent_nodes ((metadata ->> 'tax_year'));
-CREATE INDEX IF NOT EXISTS parent_nodes_form_number_idx
-    ON parent_nodes ((metadata ->> 'form_number'));
-CREATE INDEX IF NOT EXISTS parent_nodes_doc_type_idx
-    ON parent_nodes ((metadata ->> 'doc_type'));
-
--- Full-text search across the verbatim parent content (English config).
-CREATE INDEX IF NOT EXISTS parent_nodes_text_fts_idx
-    ON parent_nodes
-    USING GIN (to_tsvector('english', text_content));
-
 -- -----------------------------------------------------------------------------
 -- Child nodes: small semantic units (sentences, table abstracts).
 -- Embeddings and BM25 sparse vectors are stored in Qdrant, not here.

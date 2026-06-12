@@ -24,6 +24,15 @@ class UnstructuredParseError(IngestionError):
     """Raised when the Unstructured Hosted API returns an unusable payload."""
 
 
+class UnsupportedPDFError(IngestionError):
+    """Raised when a downloaded PDF is not renderable content.
+
+    Some IRS PDFs are XFA/AcroForms that require Adobe Reader 8+ and contain
+    only a stub page with an error message instead of the actual document body.
+    These cannot be parsed and should be silently skipped.
+    """
+
+
 class SummarizationError(IngestionError):
     """Raised when both the primary and fallback table summarizers fail."""
 

@@ -131,6 +131,13 @@ class DocumentRepository:
             when,
         )
 
+    async def unmark_processed(self, doc_id: UUID) -> None:
+        """Clear processed_at so the next backfill run will re-ingest this document."""
+        await self._db.execute(
+            "UPDATE ingested_documents SET processed_at = NULL WHERE doc_id = $1",
+            doc_id,
+        )
+
     async def list_processed_urls(self) -> set[str]:
         rows = await self._db.fetch(
             "SELECT pdf_url FROM ingested_documents WHERE processed_at IS NOT NULL"
