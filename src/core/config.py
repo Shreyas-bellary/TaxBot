@@ -69,11 +69,22 @@ class Settings(BaseSettings):
 
     openrouter_api_key: SecretStr | None = Field(
         default=None,
-        description="Optional OpenRouter fallback for table summarization.",
+        description=(
+            "OpenRouter API key. Required when table_summary_provider or "
+            "answer_llm_provider is openrouter; otherwise used as table-summary fallback."
+        ),
     )
     openrouter_model: str = Field(
         default="google/gemini-flash-1.5",
-        description="OpenRouter model id used when Gemini Flash is unavailable.",
+        description="OpenRouter model id for table summarization and answer synthesis.",
+    )
+
+    table_summary_provider: AnswerProvider = Field(
+        default="gemini",
+        description=(
+            "Primary LLM provider for table summarization during ingest. "
+            "The other provider is always used as fallback when configured."
+        ),
     )
 
     answer_llm_provider: AnswerProvider = Field(
@@ -163,6 +174,23 @@ class Settings(BaseSettings):
         description=(
             "Maximum number of Qdrant points sent in a single upsert request. "
             "Large publications can produce 500+ child nodes; batching avoids timeouts."
+        ),
+    )
+    qdrant_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0.0,
+        description=(
+            "HTTP timeout (seconds) for Qdrant Cloud API calls. "
+            "Increase for large batched upserts over slow links."
+        ),
+    )
+    qdrant_upsert_max_retries: int = Field(
+        default=4,
+        ge=0,
+        le=10,
+        description=(
+            "Retry budget for transient Qdrant upsert failures (write/read timeouts, "
+            "transport errors)."
         ),
     )
 

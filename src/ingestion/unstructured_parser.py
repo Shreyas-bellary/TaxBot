@@ -14,9 +14,18 @@ from unstructured_client import UnstructuredClient
 from unstructured_client.models import operations, shared
 
 from core.config import Settings, get_settings
-from core.errors import UnstructuredParseError
+from core.errors import UnstructuredParseError, UnsupportedPDFError
 from core.logging_config import get_logger
 from ingestion.narrative_filters import filter_irs_narratives
+
+# Phrases that appear verbatim in the stub page of XFA/AcroForm PDFs that
+# require Adobe Reader 8+. Checked against the first page's extracted text
+# after Unstructured has decompressed the content stream.
+_ADOBE_STUB_PHRASES: tuple[str, ...] = (
+    "requires Adobe Reader",
+    "Adobe Reader installed",
+    "pdf_forms_configure",
+)
 
 logger = get_logger(__name__)
 
@@ -50,6 +59,21 @@ class UnstructuredDocument:
 
     narratives: tuple[NarrativeBlock, ...] = field(default_factory=tuple)
     tables: tuple[TableBlock, ...] = field(default_factory=tuple)
+
+
+def _is_adobe_reader_stub(document: UnstructuredDocument, filename: str) -> bool:
+    """Return True if the parsed content looks like an Adobe Reader stub page.
+
+    XFA/AcroForm PDFs that require Adobe Reader 8+ yield only a single error
+    page when parsed. Unstructured decompresses the content stream so the
+    marker phrases are readable at this point, unlike in raw PDF bytes.
+    Only the first-page narratives are checked to keep the scan fast.
+    """
+    first_page = [
+        b for b in document.narratives if b.page_number in (None, 1)
+    ]
+    combined = " ".join(b.text for b in first_page[:20])
+    return any(phrase in combined for phrase in _ADOBE_STUB_PHRASES)
 
 
 class UnstructuredParser:
@@ -92,6 +116,11 @@ class UnstructuredParser:
                 if not elements:
                     raise UnstructuredParseError(f"No elements returned for {filename}")
                 document = _elements_to_document(elements)
+                if _is_adobe_reader_stub(document, filename):
+                    raise UnsupportedPDFError(
+                        f"{filename} is an XFA/AcroForm stub that requires Adobe Reader "
+                        "and contains no parseable content — skipping."
+                    )
                 filtered_narratives = filter_irs_narratives(
                     document.narratives,
                     settings=self._settings,

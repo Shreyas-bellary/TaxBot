@@ -1,4 +1,8 @@
-"""Table summarisation with a Gemini Flash primary and OpenRouter fallback.
+"""Table summarisation with a configurable primary provider and automatic fallback.
+
+Primary and fallback are selected via Settings.table_summary_provider:
+  * `gemini`     — Gemini primary, OpenRouter fallback
+  * `openrouter` — OpenRouter primary, Gemini fallback
 
 The summariser produces a *deterministic* 3-sentence description for every
 table extracted by Unstructured. The full markdown table is preserved in the
@@ -98,13 +102,19 @@ class TableSummarizer:
         fallback: SummarizeFn | None = None,
     ) -> None:
         self._settings = settings or get_settings()
-        self._primary = primary or _make_gemini_summarizer(self._settings)
-        self._fallback = fallback or _make_openrouter_summarizer(self._settings)
+        if primary is None or fallback is None:
+            resolved_primary, resolved_fallback = _resolve_table_summarizer_providers(
+                self._settings
+            )
+            self._primary = primary or resolved_primary
+            self._fallback = fallback if fallback is not None else resolved_fallback
+        else:
+            self._primary = primary
+            self._fallback = fallback
         self._concurrency = asyncio.Semaphore(self._settings.table_summary_concurrency)
 
     async def summarize(self, payload: TableSummaryInput) -> str:
-        """Run the primary under the shared concurrency gate, falling back to
-        OpenRouter on failure."""
+        """Run the primary under the shared concurrency gate, falling back on failure."""
 
         async with self._concurrency:
             try:
@@ -131,6 +141,24 @@ class TableSummarizer:
 # ----------------------------------------------------------------------------
 # Provider adapters
 # ----------------------------------------------------------------------------
+def _resolve_table_summarizer_providers(
+    settings: Settings,
+) -> tuple[SummarizeFn, SummarizeFn | None]:
+    """Return (primary, fallback) for table summarization from settings."""
+    gemini = _make_gemini_summarizer(settings)
+    openrouter = _make_openrouter_summarizer(settings)
+
+    if settings.table_summary_provider == "gemini":
+        return gemini, openrouter
+
+    if openrouter is None:
+        raise ValueError(
+            "TAXBOT_OPENROUTER_API_KEY is required when "
+            "TAXBOT_TABLE_SUMMARY_PROVIDER=openrouter"
+        )
+    return openrouter, gemini
+
+
 def _build_prompt(payload: TableSummaryInput) -> str:
     return _SUMMARY_PROMPT_TEMPLATE.format(
         doc_number=payload.doc_number,

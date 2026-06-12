@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import SecretStr
 
+from core.config import Settings
 from core.errors import SummarizationError
 from ingestion.summarizer import (
     TableSummarizer,
     TableSummaryInput,
     _enforce_three_sentences,
+    _resolve_table_summarizer_providers,
 )
 
 
@@ -72,3 +75,44 @@ async def test_summarizer_raises_when_all_paths_fail() -> None:
                 table_markdown="| a | b |\n| - | - |\n| 1 | 2 |",
             )
         )
+
+
+def test_resolve_table_summarizer_providers_gemini_primary() -> None:
+    settings = Settings(
+        postgres_dsn="postgresql://postgres:postgres@localhost:5432/postgres",
+        unstructured_api_key=SecretStr("key"),
+        huggingface_api_token=SecretStr("token"),
+        gemini_api_key=SecretStr("gemini"),
+        openrouter_api_key=SecretStr("openrouter"),
+        table_summary_provider="gemini",
+    )
+    primary, fallback = _resolve_table_summarizer_providers(settings)
+    assert primary is not None
+    assert fallback is not None
+
+
+def test_resolve_table_summarizer_providers_openrouter_primary() -> None:
+    settings = Settings(
+        postgres_dsn="postgresql://postgres:postgres@localhost:5432/postgres",
+        unstructured_api_key=SecretStr("key"),
+        huggingface_api_token=SecretStr("token"),
+        gemini_api_key=SecretStr("gemini"),
+        openrouter_api_key=SecretStr("openrouter"),
+        table_summary_provider="openrouter",
+    )
+    primary, fallback = _resolve_table_summarizer_providers(settings)
+    assert primary is not None
+    assert fallback is not None
+
+
+def test_resolve_table_summarizer_providers_openrouter_requires_key() -> None:
+    settings = Settings(
+        postgres_dsn="postgresql://postgres:postgres@localhost:5432/postgres",
+        unstructured_api_key=SecretStr("key"),
+        huggingface_api_token=SecretStr("token"),
+        gemini_api_key=SecretStr("gemini"),
+        openrouter_api_key=None,
+        table_summary_provider="openrouter",
+    )
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
+        _resolve_table_summarizer_providers(settings)

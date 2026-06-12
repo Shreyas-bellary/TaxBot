@@ -101,7 +101,7 @@ async def run_backfill(
                             "backfill_document_failed",
                             doc_number=metadata.doc_number,
                             pdf_url=str(metadata.pdf_url),
-                            error=str(exc),
+                            error=repr(exc),
                         )
 
             async for metadata in _scrape_window(scraper, settings, counts):

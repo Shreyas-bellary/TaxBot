@@ -54,6 +54,14 @@ _SORT_PARAMS: dict[str, dict[str, str]] = {
 
 _VERSION_TITLE_RE = re.compile(r"\bversion\b", re.IGNORECASE)
 
+# Matches IRS bilingual glossary titles such as:
+#   "English-Haitian Glossary of Words and Phrases"
+#   "English-Spanish Glossary of Words and Phrases"
+_GLOSSARY_TITLE_RE = re.compile(
+    r"\bglossary\s+of\s+words\s+and\s+phrases\b",
+    re.IGNORECASE,
+)
+
 
 class IRSAJAXClient:
     """Async client that walks the IRS Drupal Views AJAX pager.
@@ -126,7 +134,10 @@ class IRSAJAXClient:
 
             yielded = 0
             for metadata in rows:
-                if drop_multilingual and _VERSION_TITLE_RE.search(metadata.doc_title):
+                if drop_multilingual and (
+                    _VERSION_TITLE_RE.search(metadata.doc_title)
+                    or _GLOSSARY_TITLE_RE.search(metadata.doc_title)
+                ):
                     logger.debug(
                         "scraper_dropped_multilingual",
                         doc_number=metadata.doc_number,

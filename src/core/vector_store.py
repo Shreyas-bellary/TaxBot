@@ -18,10 +18,20 @@ need:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from functools import partial
 from typing import Any
 from uuid import UUID
 
+import httpx
 from qdrant_client import AsyncQdrantClient, models
+from qdrant_client.http.exceptions import ResponseHandlingException
+from tenacity import (
+    AsyncRetrying,
+    RetryCallState,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from core.config import Settings, get_settings
 from core.logging_config import get_logger
@@ -77,6 +87,35 @@ def _build_metadata_filter(
     return models.Filter(must=conditions)
 
 
+def _is_qdrant_upsert_retryable(exc: BaseException) -> bool:
+    """Return True for transient Qdrant upsert failures worth retrying."""
+    if isinstance(exc, httpx.TimeoutException | httpx.TransportError):
+        return True
+    if isinstance(exc, ResponseHandlingException):
+        source = getattr(exc, "source", None) or exc.__cause__
+        if isinstance(source, httpx.TimeoutException | httpx.TransportError):
+            return True
+    return "timeout" in repr(exc).lower()
+
+
+def _log_qdrant_upsert_retry(
+    retry_state: RetryCallState,
+    *,
+    doc_id: str,
+    batch_start: int,
+    batch_count: int,
+) -> None:
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    logger.warning(
+        "qdrant_upsert_retrying",
+        doc_id=doc_id,
+        batch_start=batch_start,
+        batch_count=batch_count,
+        attempt=retry_state.attempt_number,
+        error=repr(exc) if exc else None,
+    )
+
+
 class HybridSearchResult:
     """Lightweight result container returned by :meth:`QdrantVectorStore.hybrid_search`."""
 
@@ -106,6 +145,7 @@ class QdrantVectorStore:
         self._client = AsyncQdrantClient(
             url=str(self._settings.qdrant_url),
             api_key=self._settings.qdrant_api_key.get_secret_value(),
+            timeout=int(self._settings.qdrant_timeout_seconds),
         )
 
     # ------------------------------------------------------------------
@@ -211,12 +251,28 @@ class QdrantVectorStore:
         batch_size = self._settings.qdrant_upsert_batch_size
         collection = self._settings.qdrant_collection
         total = len(points)
+        max_retries = self._settings.qdrant_upsert_max_retries
         for start in range(0, total, batch_size):
             batch = points[start : start + batch_size]
-            await self._client.upsert(
-                collection_name=collection,
-                points=batch,
-            )
+            batch_count = len(batch)
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(max_retries + 1),
+                wait=wait_exponential(multiplier=1.0, min=2.0, max=30.0),
+                retry=retry_if_exception(_is_qdrant_upsert_retryable),
+                reraise=True,
+                before_sleep=partial(
+                    _log_qdrant_upsert_retry,
+                    doc_id=doc_id,
+                    batch_start=start,
+                    batch_count=batch_count,
+                ),
+            ):
+                with attempt:
+                    await self._client.upsert(
+                        collection_name=collection,
+                        points=batch,
+                        wait=True,
+                    )
             logger.info(
                 "qdrant_upsert",
                 batch_start=start,
