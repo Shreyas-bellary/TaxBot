@@ -27,6 +27,7 @@ from uuid import UUID
 
 from pydantic import HttpUrl
 from qdrant_client.models import SparseVector
+
 from core.config import Settings, get_settings
 from core.errors import OUT_OF_DOMAIN_MESSAGE, OutOfDomainQueryError, RetrievalError
 from core.logging_config import get_logger

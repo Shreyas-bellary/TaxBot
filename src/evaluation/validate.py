@@ -28,7 +28,9 @@ from core.generation import AnswerGenerator
 from core.logging_config import configure_logging, get_logger
 from core.repository import DocumentRepository
 from core.retrieval import HybridRetriever
+from core.vector_store import QdrantVectorStore
 from ingestion.embeddings import HuggingFaceEmbedder
+from ingestion.sparse_encoder import SparseEncoder
 
 logger = get_logger(__name__)
 
@@ -100,8 +102,17 @@ async def run_pipeline(
     semaphore = asyncio.Semaphore(max_concurrency)
 
     async with Database(settings) as database, HuggingFaceEmbedder(settings) as embedder:
+        vector_store = QdrantVectorStore(settings)
+        await vector_store.ensure_collection()
+        sparse_encoder = SparseEncoder(settings)
         repository = DocumentRepository(database)
-        retriever = HybridRetriever(repository, embedder, settings=settings)
+        retriever = HybridRetriever(
+            repository,
+            embedder,
+            vector_store,
+            sparse_encoder,
+            settings=settings,
+        )
         generator = AnswerGenerator(retriever, settings=settings)
 
         async def _one(case: EvaluationCase) -> CaseResult:
