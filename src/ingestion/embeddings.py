@@ -12,16 +12,23 @@ from collections.abc import Sequence
 import httpx
 from tenacity import (
     AsyncRetrying,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
 
 from core.config import Settings, get_settings
-from core.errors import EmbeddingError
+from core.errors import EmbeddingError, EmbeddingQuotaError
 from core.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _is_hf_retryable(exc: BaseException) -> bool:
+    """Return True for transient HF errors. Quota exhaustion (402) is not retryable."""
+    if isinstance(exc, EmbeddingQuotaError):
+        return False
+    return isinstance(exc, httpx.TransportError | httpx.HTTPStatusError | EmbeddingError)
 
 
 class HuggingFaceEmbedder:
@@ -45,6 +52,7 @@ class HuggingFaceEmbedder:
             },
             transport=transport,
         )
+        self._semaphore = asyncio.Semaphore(self._settings.hf_embed_concurrency)
 
     async def __aenter__(self) -> HuggingFaceEmbedder:
         return self
@@ -66,10 +74,9 @@ class HuggingFaceEmbedder:
         malformed entry cannot poison the rest of the batch."""
 
         results: list[tuple[float, ...]] = [() for _ in texts]
-        semaphore = asyncio.Semaphore(8)
 
         async def _one(index: int, payload: str) -> None:
-            async with semaphore:
+            async with self._semaphore:
                 results[index] = await self._embed_one(payload)
 
         await asyncio.gather(*(_one(i, t) for i, t in enumerate(texts)))
@@ -87,16 +94,42 @@ class HuggingFaceEmbedder:
 
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(self._settings.irs_max_retries + 1),
-            wait=wait_exponential(multiplier=1.0, max=15.0),
-            retry=retry_if_exception_type(
-                (httpx.TransportError, httpx.HTTPStatusError, EmbeddingError)
-            ),
+            wait=wait_exponential(multiplier=2.0, min=2.0, max=60.0),
+            retry=retry_if_exception(_is_hf_retryable),
             reraise=True,
+            before_sleep=lambda rs: logger.warning(
+                "hf_embed_retrying",
+                attempt=rs.attempt_number,
+                wait_seconds=round(rs.next_action.sleep, 1) if rs.next_action else None,
+                error=str(rs.outcome.exception()) if rs.outcome else None,
+            ),
         ):
             with attempt:
                 response = await self._client.post(url, json=body)
+
+                if response.status_code == 402:
+                    logger.error(
+                        "hf_embed_quota_exceeded",
+                        status=402,
+                        model=self._settings.embedding_model,
+                        hint="Upgrade HF plan or wait for quota reset.",
+                    )
+                    raise EmbeddingQuotaError(
+                        "HuggingFace embedding quota exceeded (HTTP 402). "
+                        "Upgrade your HF plan or wait for the quota window to reset."
+                    )
+
+                if response.status_code == 429:
+                    logger.warning(
+                        "hf_embed_rate_limited",
+                        status=429,
+                        model=self._settings.embedding_model,
+                    )
+                    raise EmbeddingError("HF rate limited (HTTP 429); retrying with backoff")
+
                 if response.status_code == 503:
                     raise EmbeddingError("HF inference endpoint cold; retrying")
+
                 response.raise_for_status()
                 vector = _coerce_vector(response.json())
                 if len(vector) != self._settings.embedding_dimension:

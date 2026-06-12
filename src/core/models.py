@@ -22,7 +22,6 @@ from pydantic import (
     HttpUrl,
     StringConstraints,
     field_validator,
-    model_validator,
 )
 
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -129,8 +128,9 @@ class ParentNode(_FrozenModel):
     """A large, highly contextual block stored in ``parent_nodes``.
 
     ``text_content`` holds whole sections or full markdown tables. The
-    ``metadata`` JSON blob is denormalised on purpose so the FTS prefilter
-    can scope by ``tax_year`` / ``form_number`` without joining child rows.
+    ``metadata`` JSON blob carries ``tax_year``, ``form_number``, and
+    ``doc_type`` for cross-reference; retrieval filters are applied in Qdrant
+    via payload conditions, not SQL.
     """
 
     id: UUID = Field(default_factory=uuid4)
@@ -141,30 +141,16 @@ class ParentNode(_FrozenModel):
 
 
 class ChildNode(_FrozenModel):
-    """A small semantic unit (sentence / table summary) linked to a parent."""
+    """A small semantic unit (sentence / table summary) linked to a parent.
+
+    Embeddings are stored in Qdrant, not in this model or in Postgres.
+    """
 
     id: UUID = Field(default_factory=uuid4)
     parent_id: UUID
     text_summary: NonEmptyStr
-    embedding: tuple[float, ...] = Field(default_factory=tuple)
     metadata: dict[str, object]
     created_at: datetime | None = None
-
-    @field_validator("embedding")
-    @classmethod
-    def _embedding_is_finite(cls, value: tuple[float, ...]) -> tuple[float, ...]:
-        for component in value:
-            if not isinstance(component, int | float) or component != component:  # NaN check
-                raise ValueError("embedding contains a non-finite or non-numeric component")
-        return value
-
-    @model_validator(mode="after")
-    def _embedding_dimension(self) -> ChildNode:
-        if len(self.embedding) not in (0, 1024):
-            raise ValueError(
-                f"embedding length must be 0 (unset) or 1024, got {len(self.embedding)}"
-            )
-        return self
 
 
 class RetrievedContext(_FrozenModel):

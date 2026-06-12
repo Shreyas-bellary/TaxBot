@@ -9,7 +9,6 @@ from core.models import (
     ChildNode,
     DocCategory,
     IRSDocumentMetadata,
-    ParentNode,
 )
 
 
@@ -49,32 +48,12 @@ def test_irs_document_metadata_rejects_unknown_prefix() -> None:
         )
 
 
-def test_child_node_embedding_dimension_enforced() -> None:
-    parent = ParentNode(
-        doc_id="00000000-0000-0000-0000-000000000001",  # type: ignore[arg-type]
-        text_content="hello",
-        metadata={"source_url": "https://www.irs.gov/x"},
-    )
-    with pytest.raises(ValidationError):
-        ChildNode(
-            parent_id=parent.id,
-            text_summary="short",
-            embedding=(0.1, 0.2, 0.3),
-            metadata={},
-        )
-
-
-def test_child_node_accepts_empty_or_1024_dim() -> None:
+def test_child_node_constructs_without_embedding() -> None:
+    """ChildNode no longer has an embedding field; vectors live in Qdrant."""
     parent_id = "00000000-0000-0000-0000-000000000002"
-    ChildNode(
+    node = ChildNode(
         parent_id=parent_id,  # type: ignore[arg-type]
-        text_summary="ok",
-        embedding=(),
-        metadata={},
+        text_summary="A sentence about the standard deduction.",
+        metadata={"node_kind": "sentence"},
     )
-    ChildNode(
-        parent_id=parent_id,  # type: ignore[arg-type]
-        text_summary="ok",
-        embedding=tuple(0.0 for _ in range(1024)),
-        metadata={},
-    )
+    assert node.text_summary.startswith("A sentence")

@@ -32,6 +32,10 @@ class EmbeddingError(IngestionError):
     """Raised when an embedding call returns a malformed or empty vector."""
 
 
+class EmbeddingQuotaError(EmbeddingError):
+    """Raised when the embedding provider reports quota exhaustion (HTTP 402).
+    """
+
 class RetrievalError(TaxBotError):
     """Raised when the hybrid retrieval pipeline cannot produce a context payload."""
 

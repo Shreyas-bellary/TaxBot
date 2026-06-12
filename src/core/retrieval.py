@@ -4,15 +4,14 @@ Pipeline order:
 
 1. **Pre-filter**: extract structured metadata hints (``tax_year``,
    ``form_number``, ``doc_type``) from the user query, then push them as
-   exact SQL ``WHERE`` clauses.
-2. **Hybrid stage**: combine a vector cosine match against the
-   ``child_nodes`` embeddings with a Postgres FTS keyword score. The hybrid
-   ranking is ``0.75 * vector + 0.25 * fts`` and runs inside a single SQL
-   statement to avoid round-trip overhead.
-3. **Layer 2 confidence gate**: reject weak/ambiguous retrievals from actual
-   ``hybrid_score`` values (no extra LLM call).
-4. **Parent expansion**: deduplicate by parent, fetch the verbatim parent
-   markdown, and assemble a :class:`RetrievedContext` payload.
+   Qdrant payload filter conditions.
+2. **Hybrid stage**: Qdrant ``query_points`` with a dense (cosine) prefetch
+   and a sparse (BM25) prefetch, fused via Reciprocal Rank Fusion (RRF).
+3. **Layer 2 confidence gate**: reject weak/ambiguous retrievals based on the
+   top hit's dense cosine similarity (which is a 0-1 absolute relevance
+   measure, unlike the rank-based RRF score).
+4. **Parent expansion**: look up parent rows by primary key from Postgres,
+   deduplicate, and assemble a :class:`RetrievedContext` payload.
 
 The retrieved context is what the answer-generation stage actually sees.
 """
@@ -27,13 +26,15 @@ from numbers import Real
 from uuid import UUID
 
 from pydantic import HttpUrl
-
+from qdrant_client.models import SparseVector
 from core.config import Settings, get_settings
 from core.errors import OUT_OF_DOMAIN_MESSAGE, OutOfDomainQueryError, RetrievalError
 from core.logging_config import get_logger
 from core.models import ParentNode, RetrievedContext
 from core.repository import DocumentRepository
+from core.vector_store import HybridSearchResult, QdrantVectorStore
 from ingestion.embeddings import HuggingFaceEmbedder
+from ingestion.sparse_encoder import SparseEncoder
 
 logger = get_logger(__name__)
 
@@ -90,23 +91,50 @@ def extract_filters(query: str) -> QueryFilters:
     )
 
 
+def _normalize_rows(
+    results: list[HybridSearchResult],
+) -> list[dict[str, object]]:
+    """Convert Qdrant search results into retrieval row dicts for the gate.
+    """
+    if not results:
+        return []
+
+    dense_top_score = results[0].dense_top_score
+    top_rrf = results[0].rrf_score
+
+    rows: list[dict[str, object]] = []
+    for hit in results:
+        hybrid_score = (
+            dense_top_score * (hit.rrf_score / top_rrf) if top_rrf > 0 else 0.0
+        )
+        rows.append(
+            {
+                "child_id": hit.child_id,
+                "parent_id": hit.parent_id,
+                "doc_id": hit.doc_id,
+                "hybrid_score": hybrid_score,
+            }
+        )
+    return rows
+
+
 class HybridRetriever:
-    """Hybrid FTS + vector retriever with parent expansion."""
+    """Dense + BM25 hybrid retriever with Qdrant and parent expansion."""
 
     def __init__(
         self,
         repository: DocumentRepository,
         embedder: HuggingFaceEmbedder,
+        vector_store: QdrantVectorStore,
+        sparse_encoder: SparseEncoder,
         *,
         settings: Settings | None = None,
-        top_k_children: int = 24,
-        top_k_parents: int = 6,
     ) -> None:
         self._repo = repository
         self._embedder = embedder
+        self._vector_store = vector_store
+        self._sparse_encoder = sparse_encoder
         self._settings = settings or get_settings()
-        self._top_k_children = top_k_children
-        self._top_k_parents = top_k_parents
 
     async def retrieve(self, query: str) -> RetrievedContext:
         """Run the hybrid retrieval pipeline for a single query."""
@@ -115,20 +143,24 @@ class HybridRetriever:
             raise RetrievalError("Empty query")
 
         filters = extract_filters(query)
-        embedding = await self._embedder.embed(query)
+        top_k = self._settings.retrieval_top_k_children
 
-        rows = await self._repo.hybrid_retrieve(
-            query_text=query,
-            query_embedding=embedding,
-            top_k_children=self._top_k_children,
+        dense_embedding, sparse_vector = await _encode_query(
+            query, self._embedder, self._sparse_encoder
+        )
+
+        results = await self._vector_store.hybrid_search(
+            dense_vector=dense_embedding,
+            sparse_vector=sparse_vector,
+            top_k=top_k,
             tax_year=filters.tax_year,
             form_number=filters.form_number,
             doc_type=filters.doc_type,
         )
 
-        # If a strict filter killed all matches, retry without it. This is
-        # safe because deterministic filters are heuristic, not authoritative.
-        if not rows and (
+        # If strict filters killed all matches, retry with no filters.
+        # This is safe: filters are heuristic, not authoritative.
+        if not results and (
             filters.tax_year is not None
             or filters.form_number is not None
             or filters.doc_type is not None
@@ -139,44 +171,53 @@ class HybridRetriever:
                 form_number=filters.form_number,
                 doc_type=filters.doc_type,
             )
-            rows = await self._repo.hybrid_retrieve(
-                query_text=query,
-                query_embedding=embedding,
-                top_k_children=self._top_k_children,
-                tax_year=None,
-                form_number=None,
-                doc_type=None,
+            results = await self._vector_store.hybrid_search(
+                dense_vector=dense_embedding,
+                sparse_vector=sparse_vector,
+                top_k=top_k,
             )
 
-        if not rows:
+        if not results:
             raise RetrievalError("No matching child nodes for query")
+
+        rows = _normalize_rows(results)
         assess_retrieval_confidence(
             rows,
             settings=self._settings,
             query_preview=query[:120],
         )
 
+        # Fetch parent rows from Postgres in one round-trip.
+        unique_parent_ids = list(
+            dict.fromkeys(UUID(r["parent_id"]) for r in rows)  # type: ignore[arg-type]
+        )
+        parent_records = await self._repo.fetch_parents(unique_parent_ids)
+
         parents: OrderedDict[UUID, ParentNode] = OrderedDict()
         matched_child_ids: list[UUID] = []
         source_urls: list[HttpUrl] = []
         seen_source_urls: set[str] = set()
+        top_k_parents = self._settings.retrieval_top_k_parents
 
         for row in rows:
             parent_id = UUID(str(row["parent_id"]))
             matched_child_ids.append(UUID(str(row["child_id"])))
             if parent_id not in parents:
-                parent_metadata = row["parent_metadata"]
+                record = parent_records.get(parent_id)
+                if record is None:
+                    continue
+                parent_metadata: dict[str, object] = record["metadata"]
                 parents[parent_id] = ParentNode(
                     id=parent_id,
-                    doc_id=UUID(str(row["doc_id"])),
-                    text_content=row["parent_text"],
+                    doc_id=UUID(str(record["doc_id"])),
+                    text_content=str(record["text_content"]),
                     metadata=parent_metadata,
                 )
                 url = parent_metadata.get("source_url")
                 if isinstance(url, str) and url and url not in seen_source_urls:
                     seen_source_urls.add(url)
                     source_urls.append(HttpUrl(url))
-            if len(parents) >= self._top_k_parents:
+            if len(parents) >= top_k_parents:
                 break
 
         return RetrievedContext(
@@ -187,14 +228,28 @@ class HybridRetriever:
         )
 
 
+async def _encode_query(
+    query: str,
+    embedder: HuggingFaceEmbedder,
+    sparse_encoder: SparseEncoder,
+) -> tuple[tuple[float, ...], SparseVector]:
+    """Concurrently encode the query for both dense and sparse retrieval."""
+    import asyncio
+
+    dense_task = asyncio.ensure_future(embedder.embed(query))
+    sparse_task = asyncio.ensure_future(sparse_encoder.embed_query(query))
+    dense_embedding, sparse_vector = await asyncio.gather(dense_task, sparse_task)
+    return dense_embedding, sparse_vector
+
+
 def assess_retrieval_confidence(
     rows: Sequence[Mapping[str, object]],
     *,
     settings: Settings,
     query_preview: str,
 ) -> None:
-    """Raise :class:`OutOfDomainQueryError` if retrieval confidence is weak."""
-
+    """Raise :class:`OutOfDomainQueryError` if retrieval confidence is weak.
+    """
     if not settings.retrieval_confidence_gate_enabled or not rows:
         return
 

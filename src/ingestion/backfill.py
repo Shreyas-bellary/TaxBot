@@ -18,10 +18,12 @@ from core.db import Database
 from core.logging_config import configure_logging, get_logger
 from core.models import IRSDocumentMetadata, IRSDocumentRecord
 from core.repository import DocumentRepository
+from core.vector_store import QdrantVectorStore
 from ingestion.embeddings import HuggingFaceEmbedder
 from ingestion.filters import is_within_backfill_window
 from ingestion.irs_scraper import IRSAJAXClient
 from ingestion.pdf_fetcher import PDFFetcher
+from ingestion.sparse_encoder import SparseEncoder
 from ingestion.summarizer import TableSummarizer
 from ingestion.table_pipeline import TablePipeline
 from ingestion.unstructured_parser import UnstructuredParser
@@ -55,42 +57,55 @@ async def run_backfill(
         repository = DocumentRepository(database)
         unstructured = UnstructuredParser(settings)
         summarizer = TableSummarizer(settings)
-        pipeline = TablePipeline(repository, embedder, summarizer, settings=settings)
+        vector_store = QdrantVectorStore(settings)
+        await vector_store.ensure_collection()
+        sparse_encoder = SparseEncoder(settings)
+        pipeline = TablePipeline(
+            repository,
+            embedder,
+            summarizer,
+            vector_store,
+            sparse_encoder,
+            settings=settings,
+        )
 
-        processed_urls = await repository.list_processed_urls()
-        semaphore = asyncio.Semaphore(concurrency)
-        tasks: list[asyncio.Task[None]] = []
+        try:
+            processed_urls = await repository.list_processed_urls()
+            semaphore = asyncio.Semaphore(concurrency)
+            tasks: list[asyncio.Task[None]] = []
 
-        async def _worker(metadata: IRSDocumentMetadata) -> None:
-            async with semaphore:
-                try:
-                    await _ingest_one(
-                        metadata=metadata,
-                        repository=repository,
-                        pdf_fetcher=pdf_fetcher,
-                        unstructured=unstructured,
-                        pipeline=pipeline,
-                    )
-                    counts["ingested"] += 1
-                except Exception as exc:
-                    counts["failed"] += 1
-                    logger.error(
-                        "backfill_document_failed",
-                        doc_number=metadata.doc_number,
-                        pdf_url=str(metadata.pdf_url),
-                        error=str(exc),
-                    )
+            async def _worker(metadata: IRSDocumentMetadata) -> None:
+                async with semaphore:
+                    try:
+                        await _ingest_one(
+                            metadata=metadata,
+                            repository=repository,
+                            pdf_fetcher=pdf_fetcher,
+                            unstructured=unstructured,
+                            pipeline=pipeline,
+                        )
+                        counts["ingested"] += 1
+                    except Exception as exc:
+                        counts["failed"] += 1
+                        logger.error(
+                            "backfill_document_failed",
+                            doc_number=metadata.doc_number,
+                            pdf_url=str(metadata.pdf_url),
+                            error=str(exc),
+                        )
 
-        async for metadata in _scrape_window(scraper, settings, counts):
-            if str(metadata.pdf_url) in processed_urls:
-                counts["filtered_existing"] += 1
-                continue
-            if max_documents is not None and counts["ingested"] >= max_documents:
-                break
-            tasks.append(asyncio.create_task(_worker(metadata)))
+            async for metadata in _scrape_window(scraper, settings, counts):
+                if str(metadata.pdf_url) in processed_urls:
+                    counts["filtered_existing"] += 1
+                    continue
+                if max_documents is not None and counts["ingested"] >= max_documents:
+                    break
+                tasks.append(asyncio.create_task(_worker(metadata)))
 
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=False)
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=False)
+        finally:
+            await vector_store.aclose()
 
     logger.info("backfill_complete", **counts)
     return counts

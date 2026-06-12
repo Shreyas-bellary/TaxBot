@@ -5,15 +5,35 @@ Given a parsed :class:`UnstructuredDocument`, this module:
   1. Splits narrative blocks into parent sections and child sentences.
   2. Stores each table's full markdown verbatim as a parent node, and stores
      a Gemini-Flash-generated 3-sentence summary as the embedded child node.
-  3. Writes all embeddings (sentence-level + table summary) into
-     ``child_nodes`` so the hybrid retriever can match them.
+  3. Writes dense embeddings and BM25 sparse vectors into Qdrant; writes
+     text-only child rows into Postgres ``child_nodes``.
+
+Deletion and consistency contract
+----------------------------------
+Re-ingestion of an existing document follows a delete-before-insert pattern
+to keep Postgres and Qdrant consistent:
+
+1. ``upsert_document`` resolves the canonical ``doc_id`` (via ``ON CONFLICT``
+   on ``pdf_url``).
+2. ``delete_nodes_for_document(doc_id)`` removes Postgres parent rows;
+   ``child_nodes`` are removed via ``ON DELETE CASCADE``.
+3. ``vector_store.delete_by_doc_id(doc_id)`` removes all matching Qdrant
+   points.
+4. New parents + children are written to Postgres, then upserted to Qdrant.
+5. **Rollback on Qdrant failure**: if the Qdrant upsert fails after Postgres
+   writes succeed, the pipeline deletes the freshly written Postgres rows
+   (``delete_nodes_for_document``) and the Qdrant points (best-effort), then
+   re-raises the exception.  This leaves both stores in the pre-ingest state,
+   which is equivalent to a failed fresh ingest for a backfill retry.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from core.config import Settings, get_settings
@@ -25,7 +45,9 @@ from core.models import (
     ParentNode,
 )
 from core.repository import DocumentRepository
+from core.vector_store import QdrantVectorStore
 from ingestion.embeddings import HuggingFaceEmbedder
+from ingestion.sparse_encoder import SparseEncoder
 from ingestion.summarizer import TableSummarizer, TableSummaryInput
 from ingestion.text_splitter import (
     group_narratives_into_parents,
@@ -54,12 +76,16 @@ class TablePipeline:
         repository: DocumentRepository,
         embedder: HuggingFaceEmbedder,
         summarizer: TableSummarizer,
+        vector_store: QdrantVectorStore,
+        sparse_encoder: SparseEncoder,
         *,
         settings: Settings | None = None,
     ) -> None:
         self._repo = repository
         self._embedder = embedder
         self._summarizer = summarizer
+        self._vector_store = vector_store
+        self._sparse_encoder = sparse_encoder
         self._settings = settings or get_settings()
 
     async def ingest_document(
@@ -70,11 +96,10 @@ class TablePipeline:
         category: DocCategory,
         language: str = "en",
     ) -> IngestionReport:
-        """Persist a freshly parsed document into the parent/child schema."""
+        """Persist a freshly parsed document into the parent/child schema.
 
-        # Replace any prior content for this document so re-ingestion is
-        # idempotent. ON DELETE CASCADE removes the matching child rows.
-        await self._repo.delete_nodes_for_document(record.doc_id)
+        See module docstring for the deletion and consistency contract.
+        """
         doc_id = await self._repo.upsert_document(
             record,
             category=category,
@@ -83,8 +108,14 @@ class TablePipeline:
                 "source_url": record.source_url,
             },
         )
+        await self._repo.delete_nodes_for_document(doc_id)
+        await self._vector_store.delete_by_doc_id(doc_id)
 
-        base_metadata = self._base_metadata(record=record, category=category)
+        base_metadata = self._base_metadata(
+            record=record,
+            category=category,
+            canonical_doc_id=doc_id,
+        )
 
         # ------------------------------------------------------------------
         # Narrative parents and sentence children
@@ -105,7 +136,6 @@ class TablePipeline:
                     ChildNode(
                         parent_id=parent.id,
                         text_summary=sentence_chunk,
-                        embedding=(),
                         metadata={**base_metadata, "node_kind": "sentence"},
                     )
                 )
@@ -156,7 +186,6 @@ class TablePipeline:
                 ChildNode(
                     parent_id=parent.id,
                     text_summary=summary_result,
-                    embedding=(),
                     metadata={
                         **parent.metadata,
                         "node_kind": "table_summary",
@@ -165,27 +194,46 @@ class TablePipeline:
             )
 
         # ------------------------------------------------------------------
-        # Embed all child texts in one batch
+        # Encode: dense embeddings (HF) + sparse BM25 (fastembed)
         # ------------------------------------------------------------------
         all_children = [*narrative_children, *table_children]
         if all_children:
-            vectors = await self._embedder.embed_batch(
-                [child.text_summary for child in all_children]
+            summaries = [child.text_summary for child in all_children]
+            dense_vectors, sparse_vectors = await asyncio.gather(
+                self._embedder.embed_batch(summaries),
+                self._sparse_encoder.embed_documents(summaries),
             )
-            embedded_children = [
-                child.model_copy(update={"embedding": vector})
-                for child, vector in zip(all_children, vectors, strict=True)
-            ]
         else:
-            embedded_children = []
+            dense_vectors = []
+            sparse_vectors = []
 
         # ------------------------------------------------------------------
-        # Persist
+        # Persist to Postgres
         # ------------------------------------------------------------------
         all_parents = [*parents_to_insert, *table_parents]
         await self._persist_parents(all_parents)
-        children_inserted = await self._repo.insert_children(embedded_children)
+        children_inserted = await self._repo.insert_children(all_children)
         await self._repo.mark_processed(doc_id)
+
+        if all_children:
+            try:
+                await self._vector_store.upsert_points(
+                    child_ids=[str(child.id) for child in all_children],
+                    dense_vectors=dense_vectors,
+                    sparse_vectors=sparse_vectors,
+                    payloads=[_qdrant_payload(child) for child in all_children],
+                    doc_id=str(doc_id),
+                )
+            except Exception as exc:
+                logger.error(
+                    "qdrant_upsert_failed_rolling_back",
+                    doc_id=str(doc_id),
+                    error=str(exc),
+                )
+                await self._repo.delete_nodes_for_document(doc_id)
+                with contextlib.suppress(Exception):
+                    await self._vector_store.delete_by_doc_id(doc_id)
+                raise
 
         report = IngestionReport(
             doc_id=doc_id,
@@ -212,9 +260,10 @@ class TablePipeline:
         *,
         record: IRSDocumentRecord,
         category: DocCategory,
+        canonical_doc_id: UUID,
     ) -> dict[str, object]:
         return {
-            "doc_id": str(record.doc_id),
+            "doc_id": str(canonical_doc_id),
             "doc_number": record.metadata.doc_number,
             "doc_title": record.metadata.doc_title,
             "doc_type": category.value,
@@ -224,3 +273,20 @@ class TablePipeline:
             "posted_date": record.metadata.posted_date,
             "source_url": record.source_url,
         }
+
+
+def _qdrant_payload(child: ChildNode) -> dict[str, Any]:
+    """Build the Qdrant point payload from a child node's metadata.
+
+    Only the fields used by retrieval filters and cross-reference lookups are
+    included in the payload; the full metadata is in Postgres.
+    """
+    meta = child.metadata
+    return {
+        "parent_id": str(child.parent_id),
+        "doc_id": str(meta.get("doc_id", "")),
+        "tax_year": meta.get("tax_year"),
+        "form_number": meta.get("form_number"),
+        "doc_type": meta.get("doc_type"),
+        "node_kind": meta.get("node_kind"),
+    }

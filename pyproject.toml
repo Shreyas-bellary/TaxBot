@@ -15,19 +15,15 @@ packages = [
 [tool.poetry.dependencies]
 python = ">=3.10,<3.14"
 
-# RAG framework
-llama-index-core = "^0.12.5"
-llama-index-vector-stores-supabase = "^0.3.0"
-llama-index-embeddings-huggingface-api = "^0.3.0"
-llama-index-llms-google-genai = "^0.1.4"
-
 # Document parsing
 unstructured-client = "^0.28.0"
 
-# Supabase + Postgres
-supabase = "^2.10.0"
+# Postgres
 asyncpg = "^0.30.0"
-pgvector = "^0.3.6"
+
+# Vector search
+qdrant-client = ">=1.12"
+fastembed = ">=0.4"
 
 # HTTP and parsing
 httpx = "^0.28.0"
@@ -119,7 +115,7 @@ module = [
     "ragas.*",
     "datasets.*",
     "unstructured_client.*",
-    "pgvector.*",
+    "fastembed.*",
 ]
 ignore_missing_imports = true
 

@@ -20,11 +20,11 @@ if str(SRC) not in sys.path:
 
 _DEFAULTS: dict[str, str] = {
     "TAXBOT_POSTGRES_DSN": "postgresql://postgres:postgres@localhost:5432/postgres",
-    "TAXBOT_SUPABASE_URL": "https://example.supabase.co",
-    "TAXBOT_SUPABASE_SERVICE_ROLE_KEY": "test-service-role-key",
     "TAXBOT_UNSTRUCTURED_API_KEY": "test-unstructured-key",
     "TAXBOT_HUGGINGFACE_API_TOKEN": "test-hf-token",
     "TAXBOT_GEMINI_API_KEY": "test-gemini-key",
+    "TAXBOT_QDRANT_URL": "https://test.qdrant.io:6333",
+    "TAXBOT_QDRANT_API_KEY": "test-qdrant-key",
 }
 
 for key, value in _DEFAULTS.items():

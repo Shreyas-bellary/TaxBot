@@ -1,0 +1,42 @@
+"""Unit tests for QdrantVectorStore helper logic.
+
+Network calls are not made; we test the filter-builder and payload helpers
+that can be exercised without a live Qdrant cluster.
+"""
+
+from __future__ import annotations
+
+from core.vector_store import _build_metadata_filter
+
+
+def test_filter_all_none_returns_none() -> None:
+    result = _build_metadata_filter(tax_year=None, form_number=None, doc_type=None)
+    assert result is None
+
+
+def test_filter_tax_year_only() -> None:
+    result = _build_metadata_filter(tax_year=2024, form_number=None, doc_type=None)
+    assert result is not None
+    assert len(result.must) == 1  # type: ignore[arg-type]
+    cond = result.must[0]  # type: ignore[index]
+    assert cond.key == "tax_year"
+    assert cond.match.value == 2024  # type: ignore[union-attr]
+
+
+def test_filter_multiple_conditions() -> None:
+    result = _build_metadata_filter(
+        tax_year=2023, form_number="Form 1040", doc_type="form"
+    )
+    assert result is not None
+    assert len(result.must) == 3  # type: ignore[arg-type]
+    keys = {c.key for c in result.must}  # type: ignore[union-attr]
+    assert keys == {"tax_year", "form_number", "doc_type"}
+
+
+def test_filter_form_number_only() -> None:
+    result = _build_metadata_filter(
+        tax_year=None, form_number="Publication 535", doc_type=None
+    )
+    assert result is not None
+    assert len(result.must) == 1  # type: ignore[arg-type]
+    assert result.must[0].key == "form_number"  # type: ignore[index]

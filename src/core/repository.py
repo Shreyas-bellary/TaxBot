@@ -161,8 +161,8 @@ class DocumentRepository:
         return UUID(str(row["id"]))
 
     async def insert_children(self, children: Iterable[ChildNode]) -> int:
-        """Bulk-insert child nodes. Returns count inserted."""
-
+        """Bulk-insert child nodes (text + metadata only). Returns count inserted.
+        """
         payload = list(children)
         if not payload:
             return 0
@@ -171,7 +171,6 @@ class DocumentRepository:
                 child.id,
                 child.parent_id,
                 child.text_summary,
-                list(child.embedding),
                 _jsonb(child.metadata),
             )
             for child in payload
@@ -179,8 +178,8 @@ class DocumentRepository:
         async with self._db.transaction() as connection:
             await connection.executemany(
                 """
-                INSERT INTO child_nodes (id, parent_id, text_summary, embedding, metadata)
-                VALUES ($1, $2, $3, $4::vector, $5::jsonb)
+                INSERT INTO child_nodes (id, parent_id, text_summary, metadata)
+                VALUES ($1, $2, $3, $4::jsonb)
                 """,
                 records,
             )
@@ -190,63 +189,29 @@ class DocumentRepository:
     # ------------------------------------------------------------------
     # retrieval queries
     # ------------------------------------------------------------------
-    async def hybrid_retrieve(
-        self,
-        *,
-        query_text: str,
-        query_embedding: Sequence[float],
-        top_k_children: int,
-        tax_year: int | None,
-        form_number: str | None,
-        doc_type: str | None,
-    ) -> list[dict[str, Any]]:
-        """Stage 1 + 2 retrieval.
 
-        Performs vector cosine similarity against ``child_nodes`` with
-        metadata pre-filters and an FTS boost, then returns matched child
-        rows along with their parent text. The downstream caller maps these
-        rows back into typed :class:`RetrievedContext` payloads.
-        """
+    async def fetch_parents(
+        self, parent_ids: Sequence[UUID]
+    ) -> dict[UUID, dict[str, Any]]:
+        """Fetch parent node rows for the given IDs in one round-trip.
 
-        sql = """
-            WITH filtered_children AS (
-                SELECT c.id            AS child_id,
-                       c.parent_id     AS parent_id,
-                       c.text_summary  AS child_summary,
-                       c.metadata      AS child_metadata,
-                       p.text_content  AS parent_text,
-                       p.metadata      AS parent_metadata,
-                       p.doc_id        AS doc_id,
-                       1 - (c.embedding <=> $1::vector) AS vector_score,
-                       ts_rank_cd(
-                           to_tsvector('english', c.text_summary),
-                           plainto_tsquery('english', $2)
-                       ) AS fts_score
-                FROM child_nodes c
-                JOIN parent_nodes p ON p.id = c.parent_id
-                WHERE ($3::int  IS NULL OR (c.metadata ->> 'tax_year')::int  = $3)
-                  AND ($4::text IS NULL OR  c.metadata ->> 'form_number'    = $4)
-                  AND ($5::text IS NULL OR  c.metadata ->> 'doc_type'       = $5)
-            )
-            SELECT *,
-                   (0.75 * vector_score) + (0.25 * fts_score) AS hybrid_score
-            FROM filtered_children
-            ORDER BY hybrid_score DESC
-            LIMIT $6
+        Returns a mapping from ``parent_id`` → row dict with keys
+        ``doc_id``, ``text_content``, and ``metadata`` (decoded JSONB).
+        IDs not found in the database are omitted from the result.
         """
+        if not parent_ids:
+            return {}
         rows = await self._db.fetch(
-            sql,
-            list(query_embedding),
-            query_text,
-            tax_year,
-            form_number,
-            doc_type,
-            top_k_children,
+            """
+            SELECT id, doc_id, text_content, metadata
+            FROM parent_nodes
+            WHERE id = ANY($1::uuid[])
+            """,
+            [str(pid) for pid in parent_ids],
         )
-        result: list[dict[str, Any]] = []
+        result: dict[UUID, dict[str, Any]] = {}
         for row in rows:
             record = dict(row)
-            record["child_metadata"] = _coerce_metadata(record["child_metadata"])
-            record["parent_metadata"] = _coerce_metadata(record["parent_metadata"])
-            result.append(record)
+            record["metadata"] = _coerce_metadata(record["metadata"])
+            result[UUID(str(record["id"]))] = record
         return result

@@ -30,7 +30,9 @@ from core.models import GenerationResult, ParentNode, RetrievedContext
 from core.repository import DocumentRepository
 from core.retrieval import HybridRetriever
 from core.security import InputGuard, OutputGuard
+from core.vector_store import QdrantVectorStore
 from ingestion.embeddings import HuggingFaceEmbedder
+from ingestion.sparse_encoder import SparseEncoder
 
 logger = get_logger(__name__)
 
@@ -39,6 +41,8 @@ class _AppState:
     settings: Settings
     database: Database
     embedder: HuggingFaceEmbedder
+    vector_store: QdrantVectorStore
+    sparse_encoder: SparseEncoder
     repository: DocumentRepository
     retriever: HybridRetriever
     generator: AnswerGenerator
@@ -55,8 +59,17 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     state.database = Database(settings)
     await state.database.connect()
     state.embedder = HuggingFaceEmbedder(settings)
+    state.vector_store = QdrantVectorStore(settings)
+    await state.vector_store.ensure_collection()
+    state.sparse_encoder = SparseEncoder(settings)
     state.repository = DocumentRepository(state.database)
-    state.retriever = HybridRetriever(state.repository, state.embedder, settings=settings)
+    state.retriever = HybridRetriever(
+        state.repository,
+        state.embedder,
+        state.vector_store,
+        state.sparse_encoder,
+        settings=settings,
+    )
     state.generator = AnswerGenerator(
         state.retriever,
         input_guard=InputGuard(settings),
@@ -68,6 +81,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await state.embedder.aclose()
+        await state.vector_store.aclose()
         await state.database.close()
 
 

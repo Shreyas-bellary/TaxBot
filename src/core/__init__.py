@@ -3,6 +3,7 @@
 from core.config import Settings, get_settings
 from core.errors import (
     EmbeddingError,
+    EmbeddingQuotaError,
     IngestionError,
     InjectionDetectedError,
     OutOfDomainQueryError,
@@ -18,6 +19,7 @@ from core.logging_config import configure_logging, get_logger
 
 __all__ = [
     "EmbeddingError",
+    "EmbeddingQuotaError",
     "IngestionError",
     "InjectionDetectedError",
     "OutOfDomainQueryError",

@@ -25,10 +25,12 @@ from core.db import Database
 from core.logging_config import configure_logging, get_logger
 from core.models import IRSDocumentMetadata, IRSDocumentRecord
 from core.repository import DocumentRepository
+from core.vector_store import QdrantVectorStore
 from ingestion.embeddings import HuggingFaceEmbedder
 from ingestion.filters import is_within_backfill_window
 from ingestion.irs_scraper import IRSAJAXClient
 from ingestion.pdf_fetcher import PDFFetcher
+from ingestion.sparse_encoder import SparseEncoder
 from ingestion.summarizer import TableSummarizer
 from ingestion.table_pipeline import TablePipeline
 from ingestion.unstructured_parser import UnstructuredParser
@@ -69,75 +71,87 @@ async def run_delta(
         repository = DocumentRepository(database)
         unstructured = UnstructuredParser(settings)
         summarizer = TableSummarizer(settings)
-        pipeline = TablePipeline(repository, embedder, summarizer, settings=settings)
+        vector_store = QdrantVectorStore(settings)
+        await vector_store.ensure_collection()
+        sparse_encoder = SparseEncoder(settings)
+        pipeline = TablePipeline(
+            repository,
+            embedder,
+            summarizer,
+            vector_store,
+            sparse_encoder,
+            settings=settings,
+        )
 
         unchanged_streak = 0
-
-        async for metadata in scraper.iter_documents(
-            sort="posted_date_desc",
-            drop_multilingual=True,
-            max_pages=max_pages,
-        ):
-            counts["scraped"] += 1
-            if not is_within_backfill_window(metadata, settings=settings):
-                counts["filtered_window"] += 1
-                continue
-
-            existing = await repository.get_existing_document(str(metadata.pdf_url))
-            metadata_diff = _metadata_changed(existing, metadata)
-
-            if existing is not None and not metadata_diff:
-                # Need to verify PDF hash before we can declare "unchanged".
-                fetched = await pdf_fetcher.fetch(str(metadata.pdf_url))
-                if existing.get("pdf_sha256") == fetched.sha256:
-                    counts["unchanged"] += 1
-                    unchanged_streak += 1
-                    await _touch_last_seen(repository, metadata)
-                    if unchanged_streak >= _UNCHANGED_STREAK_LIMIT:
-                        logger.info(
-                            "delta_unchanged_streak_short_circuit",
-                            streak=unchanged_streak,
-                        )
-                        break
+        try:
+            async for metadata in scraper.iter_documents(
+                sort="posted_date_desc",
+                drop_multilingual=True,
+                max_pages=max_pages,
+            ):
+                counts["scraped"] += 1
+                if not is_within_backfill_window(metadata, settings=settings):
+                    counts["filtered_window"] += 1
                     continue
-                counts["hash_changed"] += 1
-                await _reingest(
-                    metadata=metadata,
-                    fetched_content=fetched.content,
-                    fetched_sha=fetched.sha256,
-                    repository=repository,
-                    unstructured=unstructured,
-                    pipeline=pipeline,
-                )
-                counts["ingested"] += 1
+
+                existing = await repository.get_existing_document(str(metadata.pdf_url))
+                metadata_diff = _metadata_changed(existing, metadata)
+
+                if existing is not None and not metadata_diff:
+                    # Need to verify PDF hash before we can declare "unchanged".
+                    fetched = await pdf_fetcher.fetch(str(metadata.pdf_url))
+                    if existing.get("pdf_sha256") == fetched.sha256:
+                        counts["unchanged"] += 1
+                        unchanged_streak += 1
+                        await _touch_last_seen(repository, metadata)
+                        if unchanged_streak >= _UNCHANGED_STREAK_LIMIT:
+                            logger.info(
+                                "delta_unchanged_streak_short_circuit",
+                                streak=unchanged_streak,
+                            )
+                            break
+                        continue
+                    counts["hash_changed"] += 1
+                    await _reingest(
+                        metadata=metadata,
+                        fetched_content=fetched.content,
+                        fetched_sha=fetched.sha256,
+                        repository=repository,
+                        unstructured=unstructured,
+                        pipeline=pipeline,
+                    )
+                    counts["ingested"] += 1
+                    unchanged_streak = 0
+                    continue
+
                 unchanged_streak = 0
-                continue
+                if existing is None:
+                    counts["new_documents"] += 1
+                else:
+                    counts["metadata_changed"] += 1
 
-            unchanged_streak = 0
-            if existing is None:
-                counts["new_documents"] += 1
-            else:
-                counts["metadata_changed"] += 1
-
-            try:
-                fetched = await pdf_fetcher.fetch(str(metadata.pdf_url))
-                await _reingest(
-                    metadata=metadata,
-                    fetched_content=fetched.content,
-                    fetched_sha=fetched.sha256,
-                    repository=repository,
-                    unstructured=unstructured,
-                    pipeline=pipeline,
-                )
-                counts["ingested"] += 1
-            except Exception as exc:
-                counts["failed"] += 1
-                logger.error(
-                    "delta_document_failed",
-                    doc_number=metadata.doc_number,
-                    pdf_url=str(metadata.pdf_url),
-                    error=str(exc),
-                )
+                try:
+                    fetched = await pdf_fetcher.fetch(str(metadata.pdf_url))
+                    await _reingest(
+                        metadata=metadata,
+                        fetched_content=fetched.content,
+                        fetched_sha=fetched.sha256,
+                        repository=repository,
+                        unstructured=unstructured,
+                        pipeline=pipeline,
+                    )
+                    counts["ingested"] += 1
+                except Exception as exc:
+                    counts["failed"] += 1
+                    logger.error(
+                        "delta_document_failed",
+                        doc_number=metadata.doc_number,
+                        pdf_url=str(metadata.pdf_url),
+                        error=str(exc),
+                    )
+        finally:
+            await vector_store.aclose()
 
     logger.info("delta_complete", **counts)
     return counts

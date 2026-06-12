@@ -19,7 +19,14 @@ from typing import TYPE_CHECKING
 
 import httpx
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types as genai_types
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from core.config import Settings, get_settings
 from core.errors import RetrievalError
@@ -31,6 +38,16 @@ if TYPE_CHECKING:
     from core.retrieval import HybridRetriever
 
 logger = get_logger(__name__)
+
+_GEMINI_RETRYABLE_CODES: frozenset[int] = frozenset({429, 500, 503})
+
+
+def _is_gemini_retryable(exc: BaseException) -> bool:
+    """Return True for transient Gemini API errors (rate-limit, server errors)."""
+    if isinstance(exc, genai_errors.APIError):
+        code = getattr(exc, "code", None)
+        return code in _GEMINI_RETRYABLE_CODES
+    return False
 
 GenerateFn = Callable[[str], Awaitable[str]]
 
@@ -145,18 +162,34 @@ def _build_generate_fn(settings: Settings) -> GenerateFn:
 def _gemini_generate_fn(settings: Settings) -> GenerateFn:
     client = genai.Client(api_key=settings.gemini_api_key.get_secret_value())
     model_id = settings.answer_llm_model
+    max_retries = settings.gemini_max_retries
+    retry_max_wait = settings.gemini_retry_max_wait
 
     async def _generate(prompt: str) -> str:
-        response = await client.aio.models.generate_content(
-            model=model_id,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.1,
-                max_output_tokens=900,
-                response_mime_type="text/plain",
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(max_retries + 1),
+            wait=wait_exponential(multiplier=2.0, min=4.0, max=retry_max_wait),
+            retry=retry_if_exception(_is_gemini_retryable),
+            reraise=True,
+            before_sleep=lambda rs: logger.warning(
+                "gemini_generation_retrying",
+                attempt=rs.attempt_number,
+                wait_seconds=round(rs.next_action.sleep, 1) if rs.next_action else None,
+                error=str(rs.outcome.exception()) if rs.outcome else None,
             ),
-        )
-        return (getattr(response, "text", "") or "").strip()
+        ):
+            with attempt:
+                response = await client.aio.models.generate_content(
+                    model=model_id,
+                    contents=prompt,
+                    config=genai_types.GenerateContentConfig(
+                        temperature=0.1,
+                        max_output_tokens=900,
+                        response_mime_type="text/plain",
+                    ),
+                )
+                return (getattr(response, "text", "") or "").strip()
+        return ""  # pragma: no cover — tenacity reraises on exhaustion
 
     return _generate
 

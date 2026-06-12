@@ -12,15 +12,18 @@ A strict heuristic post-validator enforces:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import httpx
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 from tenacity import (
     AsyncRetrying,
+    retry_if_exception,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -51,6 +54,16 @@ Three-sentence summary:"""
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _MAX_SUMMARY_CHARS = 1500
 
+_GEMINI_RETRYABLE_CODES: frozenset[int] = frozenset({429, 500, 503})
+
+
+def _is_gemini_retryable(exc: BaseException) -> bool:
+    """Return True for transient Gemini errors (rate-limit, server errors)."""
+    if isinstance(exc, genai_errors.APIError):
+        code = getattr(exc, "code", None)
+        return code in _GEMINI_RETRYABLE_CODES
+    return False
+
 
 @dataclass(frozen=True, slots=True)
 class TableSummaryInput:
@@ -76,29 +89,32 @@ class TableSummarizer:
         self._settings = settings or get_settings()
         self._primary = primary or _make_gemini_summarizer(self._settings)
         self._fallback = fallback or _make_openrouter_summarizer(self._settings)
+        self._concurrency = asyncio.Semaphore(self._settings.table_summary_concurrency)
 
     async def summarize(self, payload: TableSummaryInput) -> str:
-        """Run the primary, falling back to OpenRouter on failure."""
+        """Run the primary under the shared concurrency gate, falling back to
+        OpenRouter on failure."""
 
-        try:
-            text = await self._primary(payload)
-            return _enforce_three_sentences(text)
-        except Exception as primary_exc:
-            logger.warning(
-                "table_summarizer_primary_failed",
-                error=str(primary_exc),
-                doc_number=payload.doc_number,
-            )
-            if self._fallback is None:
-                raise SummarizationError(str(primary_exc)) from primary_exc
+        async with self._concurrency:
             try:
-                text = await self._fallback(payload)
+                text = await self._primary(payload)
                 return _enforce_three_sentences(text)
-            except Exception as fallback_exc:
-                raise SummarizationError(
-                    f"Primary and fallback summarizers failed: "
-                    f"primary={primary_exc!r}, fallback={fallback_exc!r}"
-                ) from fallback_exc
+            except Exception as primary_exc:
+                logger.warning(
+                    "table_summarizer_primary_failed",
+                    error=str(primary_exc),
+                    doc_number=payload.doc_number,
+                )
+                if self._fallback is None:
+                    raise SummarizationError(str(primary_exc)) from primary_exc
+                try:
+                    text = await self._fallback(payload)
+                    return _enforce_three_sentences(text)
+                except Exception as fallback_exc:
+                    raise SummarizationError(
+                        f"Primary and fallback summarizers failed: "
+                        f"primary={primary_exc!r}, fallback={fallback_exc!r}"
+                    ) from fallback_exc
 
 
 # ----------------------------------------------------------------------------
@@ -116,23 +132,42 @@ def _build_prompt(payload: TableSummaryInput) -> str:
 def _make_gemini_summarizer(settings: Settings) -> SummarizeFn:
     client = genai.Client(api_key=settings.gemini_api_key.get_secret_value())
     model_id = settings.gemini_model
+    max_retries = settings.gemini_max_retries
+    retry_max_wait = settings.gemini_retry_max_wait
 
     async def _summarize(payload: TableSummaryInput) -> str:
         prompt = _build_prompt(payload)
-        response = await client.aio.models.generate_content(
-            model=model_id,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.0,
-                max_output_tokens=400,
-                response_mime_type="text/plain",
-                thinking_config=genai_types.ThinkingConfig(thinking_level=genai_types.ThinkingLevel.MINIMAL)
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(max_retries + 1),
+            wait=wait_exponential(multiplier=2.0, min=4.0, max=retry_max_wait),
+            retry=retry_if_exception(_is_gemini_retryable),
+            reraise=True,
+            before_sleep=lambda rs: logger.warning(
+                "gemini_summarizer_retrying",
+                attempt=rs.attempt_number,
+                wait_seconds=round(rs.next_action.sleep, 1) if rs.next_action else None,
+                doc_number=payload.doc_number,
+                error=str(rs.outcome.exception()) if rs.outcome else None,
             ),
-        )
-        text = getattr(response, "text", "") or ""
-        if not text.strip():
-            raise SummarizationError("Gemini returned empty completion")
-        return text.strip()
+        ):
+            with attempt:
+                response = await client.aio.models.generate_content(
+                    model=model_id,
+                    contents=prompt,
+                    config=genai_types.GenerateContentConfig(
+                        temperature=0.0,
+                        max_output_tokens=400,
+                        response_mime_type="text/plain",
+                        thinking_config=genai_types.ThinkingConfig(
+                            thinking_level=genai_types.ThinkingLevel.MINIMAL
+                        ),
+                    ),
+                )
+                text = getattr(response, "text", "") or ""
+                if not text.strip():
+                    raise SummarizationError("Gemini returned empty completion")
+                return text.strip()
+        raise SummarizationError("Gemini summarizer exhausted retries")  # pragma: no cover
 
     return _summarize
 

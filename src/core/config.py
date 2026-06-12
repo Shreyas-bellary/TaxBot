@@ -37,11 +37,6 @@ class Settings(BaseSettings):
         ...,
         description="Async Postgres DSN used by asyncpg for parent/child writes.",
     )
-    supabase_url: AnyHttpUrl = Field(..., description="Supabase project URL.")
-    supabase_service_role_key: SecretStr = Field(
-        ...,
-        description="Service-role key used for privileged Supabase REST calls.",
-    )
 
     unstructured_api_key: SecretStr = Field(..., description="Hosted Unstructured API key.")
     unstructured_api_url: AnyHttpUrl = Field(
@@ -60,7 +55,7 @@ class Settings(BaseSettings):
     embedding_dimension: int = Field(
         default=1024,
         ge=1,
-        description="Dimensionality of the embedding vectors written into pgvector.",
+        description="Dimensionality of the dense embedding vectors (must match Qdrant collection).",
     )
 
     gemini_api_key: SecretStr = Field(
@@ -126,6 +121,43 @@ class Settings(BaseSettings):
         description="Bounded retry budget for transient IRS HTTP failures.",
     )
 
+    # --- Rate-limit resilience ---
+    gemini_max_retries: int = Field(
+        default=6,
+        ge=0,
+        le=20,
+        description=(
+            "Maximum retry attempts for Gemini API calls on 429/500/503 responses. "
+            "Applies to both table summarization and answer generation."
+        ),
+    )
+    gemini_retry_max_wait: float = Field(
+        default=60.0,
+        gt=0.0,
+        description=(
+            "Maximum seconds to wait between Gemini retry attempts (exponential backoff ceiling). "
+            "Increase when hitting sustained 429 quota limits during backfill."
+        ),
+    )
+    hf_embed_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description=(
+            "Maximum simultaneous HuggingFace embedding requests across all in-flight documents. "
+            "Reduce to 1-2 when hitting HF free-tier rate limits during backfill."
+        ),
+    )
+    table_summary_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description=(
+            "Maximum simultaneous Gemini table-summary calls across all in-flight documents. "
+            "Reduce to 1-2 when hitting Gemini free-tier rate limits during backfill."
+        ),
+    )
+
     cors_allow_origins: str = Field(
         default="http://localhost:5173",
         description="Comma-separated browser origins allowed to call the API.",
@@ -140,6 +172,41 @@ class Settings(BaseSettings):
         default="USER_QUERY_END_5f3c1e",
         min_length=8,
         description="Closing fence used to delimit untrusted user input inside prompts.",
+    )
+
+    # --- Qdrant vector store ---
+    qdrant_url: AnyHttpUrl = Field(
+        ...,
+        description="Qdrant Cloud (or local) cluster URL, e.g. https://xxx.qdrant.io:6333.",
+    )
+    qdrant_api_key: SecretStr = Field(
+        ...,
+        description="Qdrant API key for the cluster.",
+    )
+    qdrant_collection: str = Field(
+        default="taxbot_child_nodes",
+        description="Qdrant collection that holds dense+sparse child-node vectors.",
+    )
+    bm25_model: str = Field(
+        default="Qdrant/bm25",
+        description="fastembed sparse model used for BM25 keyword retrieval.",
+    )
+    retrieval_top_k_children: int = Field(
+        default=24,
+        ge=1,
+        le=200,
+        description="Number of candidate child nodes fetched from Qdrant per retrieval pass.",
+    )
+    retrieval_top_k_parents: int = Field(
+        default=6,
+        ge=1,
+        le=50,
+        description="Maximum unique parent nodes assembled into RetrievedContext.",
+    )
+    retrieval_rrf_k: int = Field(
+        default=60,
+        ge=1,
+        description="RRF constant k used in Qdrant fusion. Higher k flattens rank differences.",
     )
 
     retrieval_confidence_gate_enabled: bool = Field(
