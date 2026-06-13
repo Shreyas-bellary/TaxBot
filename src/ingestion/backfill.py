@@ -1,6 +1,6 @@
 """Historical backfill entry point.
 
-Walks the IRS AJAX listing once (last 5 tax years), downloads each PDF,
+Walks the IRS AJAX listing once (last 3 tax years), downloads each PDF,
 parses it via Unstructured, and persists parent/child nodes through the
 table pipeline.
 """
@@ -15,13 +15,13 @@ from typing import NoReturn
 
 from core.config import Settings, get_settings
 from core.db import Database
-from core.errors import UnsupportedPDFError
+from core.errors import OversizedPublicationError, UnsupportedPDFError
 from core.logging_config import configure_logging, get_logger
 from core.models import IRSDocumentMetadata, IRSDocumentRecord
 from core.repository import DocumentRepository
 from core.vector_store import QdrantVectorStore
 from ingestion.embeddings import HuggingFaceEmbedder
-from ingestion.filters import is_within_backfill_window
+from ingestion.filters import is_within_backfill_window, reject_oversized_publication
 from ingestion.irs_scraper import IRSAJAXClient
 from ingestion.pdf_fetcher import PDFFetcher
 from ingestion.sparse_encoder import SparseEncoder
@@ -46,6 +46,7 @@ async def run_backfill(
         "filtered_window": 0,
         "filtered_existing": 0,
         "filtered_unsupported": 0,
+        "filtered_oversized_publications": 0,
         "ingested": 0,
         "failed": 0,
     }
@@ -85,16 +86,26 @@ async def run_backfill(
                             pdf_fetcher=pdf_fetcher,
                             unstructured=unstructured,
                             pipeline=pipeline,
+                            settings=settings,
                         )
                         counts["ingested"] += 1
-                    except UnsupportedPDFError as exc:
-                        counts["filtered_unsupported"] += 1
-                        logger.warning(
-                            "backfill_pdf_unsupported_skipped",
-                            doc_number=metadata.doc_number,
-                            pdf_url=str(metadata.pdf_url),
-                            reason=str(exc),
-                        )
+                    except (UnsupportedPDFError, OversizedPublicationError) as exc:
+                        if isinstance(exc, OversizedPublicationError):
+                            counts["filtered_oversized_publications"] += 1
+                            logger.warning(
+                                "backfill_publication_oversized_skipped",
+                                doc_number=metadata.doc_number,
+                                pdf_url=str(metadata.pdf_url),
+                                reason=str(exc),
+                            )
+                        else:
+                            counts["filtered_unsupported"] += 1
+                            logger.warning(
+                                "backfill_pdf_unsupported_skipped",
+                                doc_number=metadata.doc_number,
+                                pdf_url=str(metadata.pdf_url),
+                                reason=str(exc),
+                            )
                     except Exception as exc:
                         counts["failed"] += 1
                         logger.error(
@@ -141,8 +152,10 @@ async def _ingest_one(
     pdf_fetcher: PDFFetcher,
     unstructured: UnstructuredParser,
     pipeline: TablePipeline,
+    settings: Settings,
 ) -> None:
     fetched = await pdf_fetcher.fetch(str(metadata.pdf_url))
+    reject_oversized_publication(metadata, fetched.content, settings=settings)
     record = IRSDocumentRecord(
         metadata=metadata,
         pdf_sha256=fetched.sha256,

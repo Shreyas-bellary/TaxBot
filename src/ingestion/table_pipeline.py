@@ -49,6 +49,7 @@ from core.vector_store import QdrantVectorStore
 from ingestion.embeddings import HuggingFaceEmbedder
 from ingestion.sparse_encoder import SparseEncoder
 from ingestion.summarizer import TableSummarizer, TableSummaryInput
+from ingestion.table_filters import is_trivial_table, should_drop_table_after_summary_failure
 from ingestion.text_splitter import (
     group_narratives_into_parents,
     split_into_child_sentences,
@@ -146,11 +147,20 @@ class TablePipeline:
         table_summary_inputs: list[TableSummaryInput] = []
         table_parents: list[ParentNode] = []
         for table in document.tables:
-            if not table.markdown.strip():
+            markdown = table.markdown.strip()
+            if not markdown:
+                continue
+            if is_trivial_table(markdown):
+                logger.info(
+                    "table_trivial_skipped",
+                    doc_number=record.metadata.doc_number,
+                    page_number=table.page_number,
+                    markdown_preview=markdown[:80],
+                )
                 continue
             parent = ParentNode(
                 doc_id=doc_id,
-                text_content=table.markdown,
+                text_content=markdown,
                 metadata={
                     **base_metadata,
                     "node_kind": "table",
@@ -164,7 +174,7 @@ class TablePipeline:
                     doc_number=record.metadata.doc_number,
                     doc_title=record.metadata.doc_title,
                     tax_year=record.metadata.tax_year,
-                    table_markdown=table.markdown,
+                    table_markdown=markdown,
                 )
             )
 
@@ -173,15 +183,30 @@ class TablePipeline:
             return_exceptions=True,
         )
 
+        table_parents_to_insert: list[ParentNode] = []
         table_children: list[ChildNode] = []
-        for parent, summary_result in zip(table_parents, table_summaries, strict=True):
+        for parent, payload, summary_result in zip(
+            table_parents, table_summary_inputs, table_summaries, strict=True
+        ):
             if isinstance(summary_result, BaseException):
+                if should_drop_table_after_summary_failure(
+                    payload.table_markdown, summary_result
+                ):
+                    logger.info(
+                        "table_trivial_dropped",
+                        doc_number=record.metadata.doc_number,
+                        parent_id=str(parent.id),
+                        error=str(summary_result),
+                    )
+                    continue
                 logger.warning(
                     "table_summary_failed",
                     parent_id=str(parent.id),
                     error=str(summary_result),
                 )
+                table_parents_to_insert.append(parent)
                 continue
+            table_parents_to_insert.append(parent)
             table_children.append(
                 ChildNode(
                     parent_id=parent.id,
@@ -210,7 +235,7 @@ class TablePipeline:
         # ------------------------------------------------------------------
         # Persist to Postgres
         # ------------------------------------------------------------------
-        all_parents = [*parents_to_insert, *table_parents]
+        all_parents = [*parents_to_insert, *table_parents_to_insert]
         await self._persist_parents(all_parents)
         children_inserted = await self._repo.insert_children(all_children)
 

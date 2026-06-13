@@ -18,9 +18,6 @@ from core.errors import UnstructuredParseError, UnsupportedPDFError
 from core.logging_config import get_logger
 from ingestion.narrative_filters import filter_irs_narratives
 
-# Phrases that appear verbatim in the stub page of XFA/AcroForm PDFs that
-# require Adobe Reader 8+. Checked against the first page's extracted text
-# after Unstructured has decompressed the content stream.
 _ADOBE_STUB_PHRASES: tuple[str, ...] = (
     "requires Adobe Reader",
     "Adobe Reader installed",
@@ -61,13 +58,8 @@ class UnstructuredDocument:
     tables: tuple[TableBlock, ...] = field(default_factory=tuple)
 
 
-def _is_adobe_reader_stub(document: UnstructuredDocument, filename: str) -> bool:
+def _is_adobe_reader_stub(document: "UnstructuredDocument", filename: str) -> bool:
     """Return True if the parsed content looks like an Adobe Reader stub page.
-
-    XFA/AcroForm PDFs that require Adobe Reader 8+ yield only a single error
-    page when parsed. Unstructured decompresses the content stream so the
-    marker phrases are readable at this point, unlike in raw PDF bytes.
-    Only the first-page narratives are checked to keep the scan fast.
     """
     first_page = [
         b for b in document.narratives if b.page_number in (None, 1)

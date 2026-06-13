@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from io import BytesIO
 
 import httpx
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 from tenacity import (
     AsyncRetrying,
     retry_if_exception_type,
@@ -25,6 +28,15 @@ from core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+
+def count_pdf_pages(content: bytes) -> int | None:
+    """Return the page count for a PDF payload, or ``None`` when unreadable."""
+
+    try:
+        reader = PdfReader(BytesIO(content), strict=False)
+        return len(reader.pages)
+    except PdfReadError:
+        return None
 
 @dataclass(frozen=True, slots=True)
 class FetchedPDF:

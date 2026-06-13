@@ -11,6 +11,7 @@ from ingestion.summarizer import (
     TableSummarizer,
     TableSummaryInput,
     _enforce_three_sentences,
+    _openrouter_message_text,
     _resolve_table_summarizer_providers,
 )
 
@@ -116,3 +117,14 @@ def test_resolve_table_summarizer_providers_openrouter_requires_key() -> None:
     )
     with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
         _resolve_table_summarizer_providers(settings)
+
+
+def test_openrouter_message_text_handles_null_and_blocks() -> None:
+    assert _openrouter_message_text({"content": None}) == ""
+    assert _openrouter_message_text({"content": "  hello  "}) == "hello"
+    assert (
+        _openrouter_message_text(
+            {"content": [{"type": "text", "text": "First. Second. Third."}]}
+        )
+        == "First. Second. Third."
+    )

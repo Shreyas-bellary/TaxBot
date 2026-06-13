@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     )
 
     backfill_oldest_tax_year: int = Field(
-        default=2020,
+        default=2023,
         ge=1990,
         le=2100,
         description="Inclusive lower bound for tax_year during historical backfill.",
@@ -111,6 +111,14 @@ class Settings(BaseSettings):
         description=(
             "Enable Layer 1 deterministic narrative hygiene: drop IRS print/proof "
             "metadata and trailing index sections before parent/child chunking."
+        ),
+    )
+    publication_max_pages: int = Field(
+        default=200,
+        ge=0,
+        description=(
+            "Skip publications with more than this many PDF pages during ingest. "
+            "Set to 0 to disable and process all publications regardless of length."
         ),
     )
 

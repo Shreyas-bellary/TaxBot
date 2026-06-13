@@ -26,15 +26,19 @@ class UnstructuredParseError(IngestionError):
 
 class UnsupportedPDFError(IngestionError):
     """Raised when a downloaded PDF is not renderable content.
-
-    Some IRS PDFs are XFA/AcroForms that require Adobe Reader 8+ and contain
-    only a stub page with an error message instead of the actual document body.
-    These cannot be parsed and should be silently skipped.
     """
+
+
+class OversizedPublicationError(IngestionError):
+    """Raised when a publication exceeds the configured page-count limit."""
 
 
 class SummarizationError(IngestionError):
     """Raised when both the primary and fallback table summarizers fail."""
+
+
+class TrivialTableError(SummarizationError):
+    """Raised when a table is too small to summarise."""
 
 
 class EmbeddingError(IngestionError):

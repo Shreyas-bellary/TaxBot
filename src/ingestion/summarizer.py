@@ -34,8 +34,9 @@ from tenacity import (
 )
 
 from core.config import Settings, get_settings
-from core.errors import SummarizationError
+from core.errors import SummarizationError, TrivialTableError
 from core.logging_config import get_logger
+from ingestion.table_filters import is_summarization_validation_error, is_trivial_table
 
 logger = get_logger(__name__)
 
@@ -121,6 +122,17 @@ class TableSummarizer:
                 text = await self._primary(payload)
                 return _enforce_three_sentences(text)
             except Exception as primary_exc:
+                if is_trivial_table(payload.table_markdown):
+                    raise TrivialTableError(
+                        f"Table too small to summarise for {payload.doc_number}"
+                    ) from primary_exc
+                if is_summarization_validation_error(primary_exc) and is_trivial_table(
+                    payload.table_markdown
+                ):
+                    raise TrivialTableError(
+                        f"Table summary validation failed for "
+                        f"{payload.doc_number}: {primary_exc}"
+                    ) from primary_exc
                 logger.warning(
                     "table_summarizer_primary_failed",
                     error=str(primary_exc),
@@ -168,6 +180,27 @@ def _build_prompt(payload: TableSummaryInput) -> str:
     )
 
 
+def _openrouter_message_text(message: dict[str, object]) -> str:
+    """Extract visible assistant text from an OpenRouter chat message."""
+
+    raw = message.get("content")
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return raw.strip()
+    if isinstance(raw, list):
+        parts: list[str] = []
+        for block in raw:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+            elif "text" in block:
+                parts.append(str(block["text"]))
+        return " ".join(part.strip() for part in parts if part.strip())
+    return str(raw).strip()
+
+
 def _make_gemini_summarizer(settings: Settings) -> SummarizeFn:
     client = genai.Client(api_key=settings.gemini_api_key.get_secret_value())
     model_id = settings.gemini_model
@@ -189,7 +222,7 @@ def _make_gemini_summarizer(settings: Settings) -> SummarizeFn:
                         contents=prompt,
                         config=genai_types.GenerateContentConfig(
                             temperature=0.0,
-                            max_output_tokens=400,
+                            max_output_tokens=800,
                             response_mime_type="text/plain",
                             thinking_config=genai_types.ThinkingConfig(
                                 thinking_level=genai_types.ThinkingLevel.MINIMAL
@@ -242,7 +275,8 @@ def _make_openrouter_summarizer(settings: Settings) -> SummarizeFn | None:
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.0,
-            "max_tokens": 400,
+            "max_tokens": 800,
+            "reasoning": {"effort": "none"},
         }
 
         async with httpx.AsyncClient(
@@ -271,14 +305,16 @@ def _make_openrouter_summarizer(settings: Settings) -> SummarizeFn | None:
                     choices = body.get("choices") or []
                     if not choices:
                         raise SummarizationError("OpenRouter returned no choices")
-                    content = (
-                        choices[0]
-                        .get("message", {})
-                        .get("content", "")
-                    )
-                    if not content.strip():
+                    choice = choices[0]
+                    if not isinstance(choice, dict):
+                        raise SummarizationError("OpenRouter returned malformed choice")
+                    message = choice.get("message")
+                    if not isinstance(message, dict):
+                        raise SummarizationError("OpenRouter returned malformed message")
+                    content = _openrouter_message_text(message)
+                    if not content:
                         raise SummarizationError("OpenRouter returned empty content")
-                    return str(content).strip()
+                    return content
         raise SummarizationError("OpenRouter call exhausted retries")  # pragma: no cover
 
     return _summarize
