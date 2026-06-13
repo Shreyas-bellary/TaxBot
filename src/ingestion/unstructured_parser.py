@@ -58,7 +58,7 @@ class UnstructuredDocument:
     tables: tuple[TableBlock, ...] = field(default_factory=tuple)
 
 
-def _is_adobe_reader_stub(document: "UnstructuredDocument", filename: str) -> bool:
+def _is_adobe_reader_stub(document: UnstructuredDocument, filename: str) -> bool:
     """Return True if the parsed content looks like an Adobe Reader stub page.
     """
     first_page = [
