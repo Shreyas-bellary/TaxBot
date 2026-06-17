@@ -149,7 +149,7 @@ def _create_gemini_ragas_llm(*, model_id: str, api_key: str) -> BaseRagasLLM:
         response_mime_type="text/plain",
     )
 
-    class _GeminiRagasLLM(BaseRagasLLM):
+    class _GeminiRagasLLM(BaseRagasLLM):  # type: ignore[misc]
         def generate_text(
             self,
             prompt: PromptValue,
@@ -190,7 +190,7 @@ def _create_gemini_ragas_llm(*, model_id: str, api_key: str) -> BaseRagasLLM:
 def _prompt_to_text(prompt: PromptValue) -> str:
     to_string = getattr(prompt, "to_string", None)
     if callable(to_string):
-        return to_string()
+        return str(to_string())
     return str(prompt)
 
 
@@ -302,7 +302,7 @@ def _make_judge_llm(settings: Settings):  # type: ignore[no-untyped-def]
         from ragas.llms import LangchainLLMWrapper
 
         return LangchainLLMWrapper(
-            ChatOpenAI(
+            ChatOpenAI(  # type: ignore[call-arg]
                 model=settings.eval_judge_model,
                 api_key=settings.openrouter_api_key.get_secret_value(),
                 base_url="https://openrouter.ai/api/v1",

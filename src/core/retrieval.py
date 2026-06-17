@@ -50,11 +50,16 @@ _DOC_TYPE_HINTS: dict[str, str] = {
     "publication": "publication",
     "pub ": "publication",
     "pub.": "publication",
-    "form": "form",
-    "schedule": "form",
     "notice": "notice",
 }
 
+# Procedural-intent verbs: user is asking *how to do* something
+_PROCEDURAL_INTENT_RE = re.compile(
+    r"\b(?:instruct|how\s+(?:to|do|does|can|should|would)|determine|complete|fill\s+out|calculate|compute|figure)\b",
+    re.IGNORECASE,
+)
+
+_INSTRUCTION_DOC_PREFIX = "Instruction"
 
 @dataclass(frozen=True, slots=True)
 class QueryFilters:
@@ -63,20 +68,34 @@ class QueryFilters:
     tax_year: int | None
     form_number: str | None
     doc_type: str | None
+    form_number_variants: tuple[str, ...] = ()
+    procedural_intent: bool = False
+
+
+def _form_family_variants(prefix: str, body: str) -> tuple[str, ...]:
+    """Build Qdrant MatchAny labels for a Form/Schedule and its instruction PDF.
+    """
+    form_number = f"{prefix} {body}".strip()
+    if prefix in ("Form", "Schedule"):
+        return (form_number, f"{_INSTRUCTION_DOC_PREFIX} {body}")
+    return (form_number,)
 
 
 def extract_filters(query: str) -> QueryFilters:
-    """Best-effort extraction of metadata pre-filters from a natural query."""
+    """Best-effort extraction of metadata pre-filters from a natural query.
+    """
 
     tax_year_match = _TAX_YEAR_RE.search(query)
     tax_year = int(tax_year_match.group(1)) if tax_year_match else None
 
     form_number: str | None = None
+    form_number_variants: tuple[str, ...] = ()
     form_match = _FORM_NUMBER_RE.search(query)
     if form_match:
         prefix = form_match.group(0).split()[0].title()
         body = form_match.group(1).strip().upper()
         form_number = f"{prefix} {body}".strip()
+        form_number_variants = _form_family_variants(prefix, body)
 
     lowered = query.lower()
     doc_type: str | None = None
@@ -85,10 +104,14 @@ def extract_filters(query: str) -> QueryFilters:
             doc_type = mapped
             break
 
+    procedural_intent = bool(_PROCEDURAL_INTENT_RE.search(query))
+
     return QueryFilters(
         tax_year=tax_year,
         form_number=form_number,
         doc_type=doc_type,
+        form_number_variants=form_number_variants,
+        procedural_intent=procedural_intent,
     )
 
 
@@ -150,17 +173,48 @@ class HybridRetriever:
             query, self._embedder, self._sparse_encoder
         )
 
-        results = await self._vector_store.hybrid_search(
-            dense_vector=dense_embedding,
-            sparse_vector=sparse_vector,
-            top_k=top_k,
-            tax_year=filters.tax_year,
-            form_number=filters.form_number,
-            doc_type=filters.doc_type,
-        )
+        results: list[HybridSearchResult] = []
+        if (
+            filters.procedural_intent
+            and filters.form_number_variants
+            and filters.doc_type is None
+        ):
+            instruction_variant = next(
+                (
+                    v
+                    for v in filters.form_number_variants
+                    if v.startswith(f"{_INSTRUCTION_DOC_PREFIX} ")
+                ),
+                None,
+            )
+            if instruction_variant:
+                results = await self._vector_store.hybrid_search(
+                    dense_vector=dense_embedding,
+                    sparse_vector=sparse_vector,
+                    top_k=top_k,
+                    tax_year=filters.tax_year,
+                    form_number_variants=(instruction_variant,),
+                    doc_type="instruction",
+                )
+                if results:
+                    logger.info(
+                        "retrieval_procedural_instruction_hit",
+                        form_number=filters.form_number,
+                        instruction_variant=instruction_variant,
+                    )
 
-        # If strict filters killed all matches, retry with no filters.
-        # This is safe: filters are heuristic, not authoritative.
+        if not results:
+            results = await self._vector_store.hybrid_search(
+                dense_vector=dense_embedding,
+                sparse_vector=sparse_vector,
+                top_k=top_k,
+                tax_year=filters.tax_year,
+                form_number=filters.form_number,
+                form_number_variants=filters.form_number_variants,
+                doc_type=filters.doc_type,
+            )
+
+        # if filters yielded nothing, retry with no filters.
         if not results and (
             filters.tax_year is not None
             or filters.form_number is not None

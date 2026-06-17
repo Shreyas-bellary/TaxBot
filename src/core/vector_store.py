@@ -54,10 +54,11 @@ def _build_metadata_filter(
     tax_year: int | None,
     form_number: str | None,
     doc_type: str | None,
+    form_number_variants: tuple[str, ...] = (),
 ) -> models.Filter | None:
     """Convert metadata filter values into a Qdrant :class:`~qdrant_client.models.Filter`.
 
-    Returns ``None`` when all three values are ``None`` (no filter applied).
+    Returns ``None`` when all inputs are ``None`` / empty (no filter applied).
     The fields must match the payload keys written during ingest.
     """
     conditions: list[models.Condition] = []
@@ -68,7 +69,15 @@ def _build_metadata_filter(
                 match=models.MatchValue(value=tax_year),
             )
         )
-    if form_number is not None:
+    if form_number_variants:
+        # Match the entire form family: blank form + instructions for that form.
+        conditions.append(
+            models.FieldCondition(
+                key="form_number",
+                match=models.MatchAny(any=list(form_number_variants)),
+            )
+        )
+    elif form_number is not None:
         conditions.append(
             models.FieldCondition(
                 key="form_number",
@@ -315,6 +324,7 @@ class QdrantVectorStore:
         tax_year: int | None = None,
         form_number: str | None = None,
         doc_type: str | None = None,
+        form_number_variants: tuple[str, ...] = (),
     ) -> list[HybridSearchResult]:
         """Run Qdrant hybrid search (dense cosine + BM25 sparse, RRF fusion).
 
@@ -327,6 +337,7 @@ class QdrantVectorStore:
             tax_year=tax_year,
             form_number=form_number,
             doc_type=doc_type,
+            form_number_variants=form_number_variants,
         )
         filtered = query_filter is not None
 

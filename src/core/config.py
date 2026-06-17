@@ -245,13 +245,13 @@ class Settings(BaseSettings):
         description="fastembed sparse model used for BM25 keyword retrieval.",
     )
     retrieval_top_k_children: int = Field(
-        default=24,
+        default=12,
         ge=1,
         le=200,
         description="Number of candidate child nodes fetched from Qdrant per retrieval pass.",
     )
     retrieval_top_k_parents: int = Field(
-        default=6,
+        default=3,
         ge=1,
         le=50,
         description="Maximum unique parent nodes assembled into RetrievedContext.",
