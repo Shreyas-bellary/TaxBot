@@ -42,6 +42,7 @@ google-genai = "^1.4.0"
 ragas = "^0.2.6"
 datasets = "^3.1.0"
 langchain-google-genai = "^2.0.6"
+langchain-community = "<0.4.2"
 
 # Operational hygiene
 tenacity = "^9.0.0"
@@ -53,6 +54,7 @@ orjson = "^3.10.11"
 # API surface 
 fastapi = "^0.115.5"
 uvicorn = { extras = ["standard"], version = "^0.32.1" }
+langchain-huggingface = "^1.2.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"

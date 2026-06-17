@@ -40,7 +40,7 @@ logger = get_logger(__name__)
 
 # Number of consecutive "unchanged" rows that triggers an early exit when
 # scraping in posted-date-desc order.
-_UNCHANGED_STREAK_LIMIT = 50
+_UNCHANGED_STREAK_LIMIT = 20
 
 
 async def run_delta(

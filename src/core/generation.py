@@ -184,7 +184,7 @@ def _gemini_generate_fn(settings: Settings) -> GenerateFn:
                     contents=prompt,
                     config=genai_types.GenerateContentConfig(
                         temperature=0.1,
-                        max_output_tokens=900,
+                        max_output_tokens=2096,
                         response_mime_type="text/plain",
                     ),
                 )
@@ -216,7 +216,7 @@ def _openrouter_generate_fn(settings: Settings) -> GenerateFn:
                     "model": model_id,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
-                    "max_tokens": 900,
+                    "max_tokens": 2096,
                 },
             )
             response.raise_for_status()

@@ -30,6 +30,9 @@ delta:
 evaluate:
 	poetry run taxbot-evaluate
 
+evaluate-case:
+	poetry run taxbot-evaluate --case-id $(CASE_ID) --debug
+
 api:
 	poetry run uvicorn api.main:app --app-dir src --reload --port 8000
 

@@ -96,6 +96,15 @@ class Settings(BaseSettings):
         description="Final answer model identifier.",
     )
 
+    eval_judge_provider: AnswerProvider = Field(
+        default="gemini",
+        description="Provider used by the Ragas evaluation judge LLM.",
+    )
+    eval_judge_model: str = Field(
+        default="gemini-2.0-flash",
+        description="Model identifier for the Ragas evaluation judge LLM.",
+    )
+
     backfill_oldest_tax_year: int = Field(
         default=2023,
         ge=1990,
