@@ -7,19 +7,44 @@ replaced with lightweight fakes so these run without any live services.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
 
 from core.config import get_settings
 from core.errors import OutOfDomainQueryError, RetrievalError
+from core.query_router import QueryRouteResult, RouteFilters
 from core.retrieval import (
     HybridRetriever,
     _normalize_rows,
     assess_retrieval_confidence,
 )
 from core.vector_store import HybridSearchResult
+
+# ---------------------------------------------------------------------------
+# Auto-patch the query router for all retrieve() tests in this module.
+# This avoids real LLM API calls; individual tests can override as needed.
+# ---------------------------------------------------------------------------
+
+_DEFAULT_ROUTE = QueryRouteResult(
+    filters=RouteFilters(tax_year=None, doc_type=None, form_numbers=None)
+)
+
+# A route with a year filter so relaxation tests can trigger the retry path
+_FILTERED_ROUTE = QueryRouteResult(
+    filters=RouteFilters(tax_year=2024, doc_type=None, form_numbers=None)
+)
+
+
+@pytest.fixture(autouse=True)
+def _patch_router(monkeypatch: pytest.MonkeyPatch):  # type: ignore[return]
+    """Patch route_query to return an empty-filter route by default."""
+    with patch(
+        "core.retrieval.route_query",
+        new=AsyncMock(return_value=_DEFAULT_ROUTE),
+    ) as mock:
+        yield mock
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -127,9 +152,11 @@ def _make_retriever(
     qdrant_results: list[HybridSearchResult],
     parent_records: dict[UUID, dict[str, Any]] | None = None,
     second_call_results: list[HybridSearchResult] | None = None,
+    settings: Any | None = None,
 ) -> HybridRetriever:
     """Build a HybridRetriever with all external I/O mocked."""
-    settings = get_settings()
+    if settings is None:
+        settings = get_settings()
 
     # Mock embedder — returns a 1024-d zero vector
     embedder = AsyncMock()
@@ -194,8 +221,11 @@ async def test_retrieve_raises_no_results() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retrieve_filter_relaxation_on_zero_results() -> None:
+async def test_retrieve_filter_relaxation_on_zero_results(_patch_router: AsyncMock) -> None:
     """When filters yield zero hits, a second unfiltered call is made."""
+    # Override router to return a year filter so relaxation triggers.
+    _patch_router.return_value = _FILTERED_ROUTE
+
     fallback_hit = _make_hit(rrf_score=1.0, dense_top_score=0.85)
     retriever = _make_retriever(
         qdrant_results=[],
@@ -210,12 +240,21 @@ async def test_retrieve_filter_relaxation_on_zero_results() -> None:
 @pytest.mark.asyncio
 async def test_retrieve_deduplicates_parents() -> None:
     """Multiple children from the same parent collapse to one parent node."""
+    from core.config import Settings
+
+    # Use explicit settings with top_k_parents > 1 so both children from the
+    # same parent are collected before the parent cap is reached.
+    settings = Settings(  # type: ignore[call-arg]
+        retrieval_top_k_parents=3,
+        retrieval_confidence_gate_enabled=False,
+    )
+
     child2_id = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
     hits = [
         _make_hit(rrf_score=1.0, dense_top_score=0.8, child_id=str(_CHILD_ID)),
         _make_hit(rrf_score=0.8, dense_top_score=0.8, child_id=str(child2_id)),
     ]
-    retriever = _make_retriever(qdrant_results=hits)
+    retriever = _make_retriever(qdrant_results=hits, settings=settings)
     ctx = await retriever.retrieve("deductions")
     assert len(ctx.parent_nodes) == 1
     assert len(ctx.matched_child_ids) == 2
@@ -228,3 +267,5 @@ async def test_retrieve_rejects_low_confidence() -> None:
     retriever = _make_retriever(qdrant_results=[hit])
     with pytest.raises(OutOfDomainQueryError):
         await retriever.retrieve("What is today's weather?")
+
+

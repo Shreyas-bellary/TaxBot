@@ -1,302 +1,454 @@
-"""Tests for the query-filter extractor used by the hybrid retriever."""
+"""Tests for the LLM query router and Qdrant filter construction.
+
+The query router replaces all regex-based filter extraction.  These tests
+cover:
+
+- ``_build_metadata_filter`` in :mod:`core.vector_store` (no network calls)
+- ``_parse_router_response`` in :mod:`core.query_router` (no network calls)
+- ``route_query`` with a mocked LLM (no real API calls)
+- ``HybridRetriever.retrieve`` with a mocked router + vector store
+"""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from qdrant_client import models
 
-from core.retrieval import extract_filters
-
-# ---------------------------------------------------------------------------
-# Basic extraction: tax_year, form_number, doc_type
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "query, year, form, doc_type",
-    [
-        # Year extraction
-        ("What is the 2024 standard deduction for MFJ?", 2024, None, None),
-        # Form reference → doc_type must NOT be set from "Form" token alone
-        ("How do I file Form 1040 in 2023?", 2023, "Form 1040", None),
-        # "Publication" *is* an explicit doc-type signal
-        ("Where do I report QBI on Publication 535?", None, "Publication 535", "publication"),
-        # "Schedule" → form_number extracted, doc_type must NOT be forced to "form"
-        ("What does Schedule SE cover?", None, "Schedule SE", None),
-        # Explicit "instructions" keyword → doc_type = instruction
-        ("How long can the IRS keep records per the instructions?", None, None, "instruction"),
-        # "instruction" (singular) → doc_type = instruction
-        ("See the instruction for completing Schedule B.", None, "Schedule B", "instruction"),
-        # "pub " shorthand — Pub is also a form-number prefix, so form_number is set
-        ("Refer to pub 505 for safe-harbor rules.", None, "Pub 505", "publication"),
-        # "notice" keyword — use a query without a year-like digit sequence
-        ("What does the IRS notice regarding EV credits say?", None, None, "notice"),
-    ],
+from core.errors import OutOfDomainQueryError, RouterError
+from core.query_router import (
+    RouteFilters,
+    _parse_router_response,
 )
-def test_extract_filters_basic(
-    query: str, year: int | None, form: str | None, doc_type: str | None
-) -> None:
-    filters = extract_filters(query)
-    assert filters.tax_year == year
-    assert filters.form_number == form
-    assert filters.doc_type == doc_type
-
+from core.vector_store import _build_metadata_filter
 
 # ---------------------------------------------------------------------------
-# case_03 regression: "Form 2555 instruct" must NOT set doc_type='form'
+# _build_metadata_filter — pure unit tests, no network
 # ---------------------------------------------------------------------------
 
 
-def test_case_03_form_2555_does_not_set_form_doc_type() -> None:
-    """Bare 'Form NNNN' in a query must never trigger doc_type='form'.
-
-    Previously the naive 'form' hint would match the substring and restrict
-    retrieval to only the blank-form PDF, missing the Instructions PDF where
-    the 330-day rule is defined.
-    """
-    query = (
-        "How does Form 2555 instruct a US citizen working abroad to determine "
-        "whether they meet the physical presence test for the foreign earned "
-        "income exclusion?"
-    )
-    filters = extract_filters(query)
-    assert filters.form_number == "Form 2555"
-    assert filters.doc_type != "form", (
-        "doc_type must not be 'form' — 'Form' is a proper-noun reference, not a doc-type signal"
-    )
+def test_filter_all_none_returns_none() -> None:
+    result = _build_metadata_filter(tax_year=None, doc_type=None, form_numbers=None)
+    assert result is None
 
 
-# ---------------------------------------------------------------------------
-# form_number_variants: form-family MatchAny set
-# ---------------------------------------------------------------------------
+def test_filter_tax_year_only() -> None:
+    result = _build_metadata_filter(tax_year=2024, doc_type=None)
+    assert result is not None
+    assert len(result.must) == 1  # type: ignore[arg-type]
+    cond = result.must[0]  # type: ignore[index]
+    assert cond.key == "tax_year"
+    assert cond.match.value == 2024  # type: ignore[union-attr]
 
 
-@pytest.mark.parametrize(
-    "query, expected_variants",
-    [
-        # Form reference → blank form + IRS instruction product number
-        (
-            "How does Form 2555 instruct you to determine the physical presence test?",
-            ("Form 2555", "Instruction 2555"),
-        ),
-        # Schedule reference → schedule + instruction product number
-        (
-            "How do I complete Schedule SE?",
-            ("Schedule SE", "Instruction SE"),
-        ),
-        # Form 1040 → includes instruction variant
-        (
-            "How do I file Form 1040?",
-            ("Form 1040", "Instruction 1040"),
-        ),
-        # Hyphenated form suffix preserved in instruction product number
-        (
-            "How do I complete Form 706-A?",
-            ("Form 706-A", "Instruction 706-A"),
-        ),
-        # Publication → only the publication itself (no instructions variant)
-        (
-            "Where is QBI explained in Publication 535?",
-            ("Publication 535",),
-        ),
-        # No form reference → no variants
-        (
-            "What is the standard deduction for MFJ in 2024?",
-            (),
-        ),
-    ],
-)
-def test_form_number_variants(query: str, expected_variants: tuple[str, ...]) -> None:
-    filters = extract_filters(query)
-    assert filters.form_number_variants == expected_variants
-
-
-# ---------------------------------------------------------------------------
-# procedural_intent detection
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "query, expect_procedural",
-    [
-        # "how does ... instruct" → procedural
-        (
-            "How does Form 2555 instruct a taxpayer to determine the 330-day test?",
-            True,
-        ),
-        # "how to" → procedural
-        ("How to report foreign income on Form 2555?", True),
-        # "how do I" → procedural
-        ("How do I complete Schedule SE?", True),
-        # "determine" → procedural
-        ("What thresholds determine the AMT exemption phase-out?", True),
-        # "complete" → procedural
-        ("Where do I complete the carryover section?", True),
-        # factual lookup → not procedural
-        ("What is the 2024 standard deduction for married filing jointly?", False),
-        # publication reference → not procedural
-        ("What does Publication 535 say about QBI?", False),
-    ],
-)
-def test_procedural_intent(query: str, expect_procedural: bool) -> None:
-    filters = extract_filters(query)
-    assert filters.procedural_intent is expect_procedural
-
-
-# ---------------------------------------------------------------------------
-# QueryFilters is fully populated (no missing fields)
-# ---------------------------------------------------------------------------
-
-
-def test_query_filters_all_fields_present() -> None:
-    """Ensure QueryFilters exposes all expected fields."""
-    f = extract_filters("How does Form 2555 instruct you to determine the 330-day test?")
-    assert hasattr(f, "tax_year")
-    assert hasattr(f, "form_number")
-    assert hasattr(f, "doc_type")
-    assert hasattr(f, "form_number_variants")
-    assert hasattr(f, "procedural_intent")
-
-
-# ---------------------------------------------------------------------------
-# _build_metadata_filter: MatchAny for form-family variants
-# ---------------------------------------------------------------------------
-
-
-def test_build_filter_uses_match_any_for_variants() -> None:
-    from qdrant_client import models
-
-    from core.vector_store import _build_metadata_filter
-
+def test_filter_single_form_number_uses_match_value() -> None:
     result = _build_metadata_filter(
-        tax_year=None,
-        form_number="Form 2555",
-        doc_type=None,
-        form_number_variants=("Form 2555", "Instruction 2555"),
+        tax_year=None, doc_type=None, form_numbers=["Form 2555"]
     )
     assert result is not None
-    conds = result.must  # type: ignore[union-attr]
-    assert len(conds) == 1
-    form_cond = conds[0]
-    assert form_cond.key == "form_number"
-    # Must be MatchAny, not MatchValue
-    assert isinstance(form_cond.match, models.MatchAny), (
-        "form_number_variants must produce MatchAny, not MatchValue"
-    )
-    assert set(form_cond.match.any) == {"Form 2555", "Instruction 2555"}
+    cond = result.must[0]  # type: ignore[index]
+    assert cond.key == "form_number"
+    assert isinstance(cond.match, models.MatchValue)
+    assert cond.match.value == "Form 2555"
 
 
-def test_build_filter_match_any_covers_both_form_and_instructions() -> None:
-    """MatchAny filter for Form 2555 variants must include the instructions label."""
-    from core.vector_store import _build_metadata_filter
-
+def test_filter_multiple_form_numbers_uses_match_any() -> None:
     result = _build_metadata_filter(
         tax_year=None,
-        form_number="Form 2555",
         doc_type=None,
-        form_number_variants=("Form 2555", "Instruction 2555"),
+        form_numbers=["Form 2555", "Instruction 2555"],
     )
     assert result is not None
-    form_cond = result.must[0]  # type: ignore[index]
-    assert "Instruction 2555" in form_cond.match.any  # type: ignore[union-attr]
+    cond = result.must[0]  # type: ignore[index]
+    assert cond.key == "form_number"
+    assert isinstance(cond.match, models.MatchAny)
+    assert set(cond.match.any) == {"Form 2555", "Instruction 2555"}
 
 
-def test_build_filter_variants_take_precedence_over_bare_form_number() -> None:
-    """When variants are provided, the bare form_number value is not used."""
-    from qdrant_client import models
-
-    from core.vector_store import _build_metadata_filter
-
-    # If both form_number and variants are given, variants win
+def test_filter_doc_type_only() -> None:
     result = _build_metadata_filter(
-        tax_year=None,
-        form_number="Form 2555",
-        doc_type=None,
-        form_number_variants=("Form 2555", "Instruction 2555"),
+        tax_year=None, doc_type="instruction", form_numbers=None
     )
     assert result is not None
-    form_cond = result.must[0]  # type: ignore[index]
-    # Must be MatchAny (not MatchValue with single string)
-    assert isinstance(form_cond.match, models.MatchAny)
+    cond = result.must[0]  # type: ignore[index]
+    assert cond.key == "doc_type"
+    assert isinstance(cond.match, models.MatchValue)
+    assert cond.match.value == "instruction"
 
 
-def test_build_filter_bare_form_number_fallback() -> None:
-    """Without variants, bare form_number still produces a MatchValue filter."""
-    from qdrant_client import models
-
-    from core.vector_store import _build_metadata_filter
-
+def test_filter_all_fields_combined() -> None:
     result = _build_metadata_filter(
-        tax_year=None,
-        form_number="Publication 535",
-        doc_type=None,
-    )
-    assert result is not None
-    form_cond = result.must[0]  # type: ignore[index]
-    assert isinstance(form_cond.match, models.MatchValue)
-    assert form_cond.match.value == "Publication 535"
-
-
-def test_build_filter_doc_type_combined_with_variants() -> None:
-    """doc_type filter is AND-ed with form_number_variants when both are set."""
-    from core.vector_store import _build_metadata_filter
-
-    result = _build_metadata_filter(
-        tax_year=None,
-        form_number=None,
-        doc_type="instruction",
-        form_number_variants=("Instruction 2555",),
+        tax_year=2023,
+        doc_type="publication",
+        form_numbers=["Publication 17"],
     )
     assert result is not None
     keys = {c.key for c in result.must}  # type: ignore[union-attr]
-    assert "form_number" in keys
-    assert "doc_type" in keys
+    assert keys == {"tax_year", "form_number", "doc_type"}
+
+
+def test_filter_empty_form_numbers_list_is_no_filter() -> None:
+    result = _build_metadata_filter(tax_year=None, doc_type=None, form_numbers=[])
+    assert result is None
 
 
 # ---------------------------------------------------------------------------
-# Tiered relaxation: stage-1 procedural search hits instruction variant
+# _parse_router_response — pure unit tests, no network
+# ---------------------------------------------------------------------------
+
+
+def test_parse_in_domain_with_filters() -> None:
+    raw = json.dumps(
+        {
+            "in_domain": True,
+            "filters": {
+                "tax_year": 2024,
+                "doc_type": "instruction",
+                "form_numbers": ["Form 1040", "Instruction 1040"],
+            },
+        }
+    )
+    result = _parse_router_response(raw)
+    assert result.in_domain is True
+    assert result.filters is not None
+    assert result.filters.tax_year == 2024
+    assert result.filters.doc_type == "instruction"
+    assert result.filters.form_numbers == ["Form 1040", "Instruction 1040"]
+
+
+def test_parse_in_domain_null_filters() -> None:
+    raw = json.dumps({"in_domain": True, "filters": None})
+    result = _parse_router_response(raw)
+    assert result.in_domain is True
+    assert result.filters is None
+
+
+def test_parse_out_of_domain() -> None:
+    raw = json.dumps({"in_domain": False, "filters": None})
+    result = _parse_router_response(raw)
+    assert result.in_domain is False
+
+
+def test_parse_strips_markdown_fences() -> None:
+    raw = "```json\n" + json.dumps({"in_domain": True, "filters": {}}) + "\n```"
+    result = _parse_router_response(raw)
+    assert result.in_domain is True
+
+
+def test_parse_raises_router_error_on_bad_json() -> None:
+    with pytest.raises(RouterError, match="non-JSON"):
+        _parse_router_response("not json at all")
+
+
+def test_parse_raises_router_error_on_missing_in_domain() -> None:
+    with pytest.raises(RouterError, match="validation"):
+        _parse_router_response(json.dumps({"filters": None}))
+
+
+# ---------------------------------------------------------------------------
+# route_query — mocked LLM, no real API calls
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_retrieve_procedural_tries_instruction_variant_first() -> None:
-    """When procedural_intent=True, retrieve() tries doc_type=instruction first."""
+async def test_route_query_in_domain_returns_filters() -> None:
+    from core.query_router import route_query
+    from core.security import SanitizedQuery
+
+    san = SanitizedQuery(
+        cleaned_text="How does Form 2555 determine the physical presence test?",
+        fenced_prompt_section="[START]\nHow does Form 2555 ...\n[END]",
+        start_tag="START",
+        end_tag="END",
+    )
+
+    raw_response = json.dumps(
+        {
+            "in_domain": True,
+            "filters": {
+                "tax_year": None,
+                "doc_type": "instruction",
+                "form_numbers": ["Form 2555", "Instruction 2555"],
+            },
+        }
+    )
+
+    with patch("core.query_router._call_gemini", new=AsyncMock(return_value=raw_response)):
+        from core.config import Settings
+
+        settings = Settings(
+            postgres_dsn="postgresql://u:p@localhost/db",
+            unstructured_api_key="x",
+            huggingface_api_token="x",
+            gemini_api_key="x",
+            qdrant_url="https://qdrant.example.com:6333",
+            qdrant_api_key="x",
+            router_llm_provider="gemini",
+            router_llm_model="gemini-2.0-flash",
+        )
+        result = await route_query(san, settings=settings)
+
+    assert result.filters.doc_type == "instruction"
+    assert "Form 2555" in (result.filters.form_numbers or [])
+    assert "Instruction 2555" in (result.filters.form_numbers or [])
+
+
+@pytest.mark.asyncio
+async def test_route_query_out_of_domain_raises() -> None:
+    from core.query_router import route_query
+    from core.security import SanitizedQuery
+
+    san = SanitizedQuery(
+        cleaned_text="What is the weather in New York?",
+        fenced_prompt_section="[START]\nWhat is the weather in New York?\n[END]",
+        start_tag="START",
+        end_tag="END",
+    )
+
+    raw_response = json.dumps({"in_domain": False, "filters": None})
+
+    with patch("core.query_router._call_gemini", new=AsyncMock(return_value=raw_response)):
+        from core.config import Settings
+
+        settings = Settings(
+            postgres_dsn="postgresql://u:p@localhost/db",
+            unstructured_api_key="x",
+            huggingface_api_token="x",
+            gemini_api_key="x",
+            qdrant_url="https://qdrant.example.com:6333",
+            qdrant_api_key="x",
+            router_llm_provider="gemini",
+            router_llm_model="gemini-2.0-flash",
+        )
+        with pytest.raises(OutOfDomainQueryError):
+            await route_query(san, settings=settings)
+
+
+@pytest.mark.asyncio
+async def test_route_query_router_error_propagates() -> None:
+    from core.query_router import route_query
+    from core.security import SanitizedQuery
+
+    san = SanitizedQuery(
+        cleaned_text="What is the 2024 standard deduction?",
+        fenced_prompt_section="[START]\nWhat is the 2024 standard deduction?\n[END]",
+        start_tag="START",
+        end_tag="END",
+    )
+
+    with patch(
+        "core.query_router._call_gemini",
+        new=AsyncMock(return_value="not valid json {{{{"),
+    ):
+        from core.config import Settings
+
+        settings = Settings(
+            postgres_dsn="postgresql://u:p@localhost/db",
+            unstructured_api_key="x",
+            huggingface_api_token="x",
+            gemini_api_key="x",
+            qdrant_url="https://qdrant.example.com:6333",
+            qdrant_api_key="x",
+            router_llm_provider="gemini",
+            router_llm_model="gemini-2.0-flash",
+        )
+        with pytest.raises(RouterError):
+            await route_query(san, settings=settings)
+
+
+# ---------------------------------------------------------------------------
+# HybridRetriever.retrieve — mocked router + vector store
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_retrieve_applies_router_filters() -> None:
+    """retrieve() calls hybrid_search with filters from the router."""
+    import uuid
+
     from core.retrieval import HybridRetriever
-
-    mock_repo = AsyncMock()
-    mock_embedder = AsyncMock()
-    mock_embedder.embed.return_value = tuple([0.1] * 1024)
-    mock_vs = AsyncMock()
-    mock_sparse = AsyncMock()
-
-    from qdrant_client.models import SparseVector
-
-    mock_sparse.embed_query.return_value = SparseVector(indices=[1], values=[1.0])
 
     _CHILD_UUID = "00000000-0000-0000-0000-000000000002"
     _PARENT_UUID = "00000000-0000-0000-0000-000000000001"
 
-    # Simulate: instruction-only search returns 1 result; standard search returns 2
-    instruction_hit = MagicMock()
-    instruction_hit.child_id = _CHILD_UUID
-    instruction_hit.parent_id = _PARENT_UUID
-    instruction_hit.doc_id = "00000000-0000-0000-0000-000000000003"
-    instruction_hit.rrf_score = 0.9
-    instruction_hit.dense_top_score = 0.85
+    mock_hit = MagicMock()
+    mock_hit.child_id = _CHILD_UUID
+    mock_hit.parent_id = _PARENT_UUID
+    mock_hit.doc_id = "00000000-0000-0000-0000-000000000003"
+    mock_hit.rrf_score = 0.9
+    mock_hit.dense_top_score = 0.85
 
-    # First call (instruction-only) returns a hit; second call should NOT be reached
-    mock_vs.hybrid_search.return_value = [instruction_hit]
+    mock_vs = AsyncMock()
+    mock_vs.hybrid_search.return_value = [mock_hit]
 
-    import uuid as _uuid
-
+    mock_repo = AsyncMock()
     mock_repo.fetch_parents.return_value = {
-        _uuid.UUID(_PARENT_UUID): {
+        uuid.UUID(_PARENT_UUID): {
             "doc_id": "00000000-0000-0000-0000-000000000003",
             "text_content": "You must be physically present...",
-            "metadata": {"source_url": "https://irs.gov/f2555i.pdf"},
+            "metadata": {"source_url": "https://irs.gov/pub/irs-pdf/i2555.pdf"},
         }
     }
+
+    mock_embedder = AsyncMock()
+    mock_embedder.embed.return_value = tuple([0.1] * 1024)
+    mock_sparse = AsyncMock()
+    from qdrant_client.models import SparseVector
+    mock_sparse.embed_query.return_value = SparseVector(indices=[1], values=[1.0])
+
+    from core.config import Settings
+    from core.query_router import QueryRouteResult
+
+    settings = Settings(
+        postgres_dsn="postgresql://u:p@localhost/db",
+        unstructured_api_key="x",
+        huggingface_api_token="x",
+        gemini_api_key="x",
+        qdrant_url="https://qdrant.example.com:6333",
+        qdrant_api_key="x",
+        retrieval_confidence_gate_enabled=False,
+        router_llm_provider="gemini",
+        router_llm_model="gemini-2.0-flash",
+    )
+
+    route_result = QueryRouteResult(
+        filters=RouteFilters(
+            tax_year=None,
+            doc_type="instruction",
+            form_numbers=["Form 2555", "Instruction 2555"],
+        )
+    )
+
+    with patch("core.retrieval.route_query", new=AsyncMock(return_value=route_result)):
+        retriever = HybridRetriever(
+            repository=mock_repo,
+            embedder=mock_embedder,
+            vector_store=mock_vs,
+            sparse_encoder=mock_sparse,
+            settings=settings,
+        )
+        ctx = await retriever.retrieve(
+            "How does Form 2555 determine the physical presence test?"
+        )
+
+    call_kwargs = mock_vs.hybrid_search.call_args_list[0].kwargs
+    assert call_kwargs.get("doc_type") == "instruction"
+    assert call_kwargs.get("form_numbers") == ["Form 2555", "Instruction 2555"]
+    assert ctx is not None
+
+
+@pytest.mark.asyncio
+async def test_retrieve_relaxes_filters_on_zero_hits() -> None:
+    """retrieve() retries without filters when filtered search returns nothing."""
+    import uuid
+
+    from core.retrieval import HybridRetriever
+
+    _PARENT_UUID = "00000000-0000-0000-0000-000000000001"
+    _CHILD_UUID = "00000000-0000-0000-0000-000000000002"
+
+    mock_hit = MagicMock()
+    mock_hit.child_id = _CHILD_UUID
+    mock_hit.parent_id = _PARENT_UUID
+    mock_hit.doc_id = "00000000-0000-0000-0000-000000000003"
+    mock_hit.rrf_score = 0.9
+    mock_hit.dense_top_score = 0.85
+
+    mock_vs = AsyncMock()
+    # First call (filtered) → empty; second (unfiltered) → hit
+    mock_vs.hybrid_search.side_effect = [[], [mock_hit]]
+
+    mock_repo = AsyncMock()
+    mock_repo.fetch_parents.return_value = {
+        uuid.UUID(_PARENT_UUID): {
+            "doc_id": "00000000-0000-0000-0000-000000000003",
+            "text_content": "Standard deduction for MFJ is $29,200.",
+            "metadata": {"source_url": "https://irs.gov/pub/irs-pdf/p17.pdf"},
+        }
+    }
+
+    mock_embedder = AsyncMock()
+    mock_embedder.embed.return_value = tuple([0.1] * 1024)
+    mock_sparse = AsyncMock()
+    from qdrant_client.models import SparseVector
+    mock_sparse.embed_query.return_value = SparseVector(indices=[1], values=[1.0])
+
+    from core.config import Settings
+    from core.query_router import QueryRouteResult
+
+    settings = Settings(
+        postgres_dsn="postgresql://u:p@localhost/db",
+        unstructured_api_key="x",
+        huggingface_api_token="x",
+        gemini_api_key="x",
+        qdrant_url="https://qdrant.example.com:6333",
+        qdrant_api_key="x",
+        retrieval_confidence_gate_enabled=False,
+        router_llm_provider="gemini",
+        router_llm_model="gemini-2.0-flash",
+    )
+
+    route_result = QueryRouteResult(
+        filters=RouteFilters(tax_year=2024, doc_type=None, form_numbers=None)
+    )
+
+    with patch("core.retrieval.route_query", new=AsyncMock(return_value=route_result)):
+        retriever = HybridRetriever(
+            repository=mock_repo,
+            embedder=mock_embedder,
+            vector_store=mock_vs,
+            sparse_encoder=mock_sparse,
+            settings=settings,
+        )
+        ctx = await retriever.retrieve(
+            "What is the 2024 standard deduction for MFJ?"
+        )
+
+    assert mock_vs.hybrid_search.call_count == 2
+    # Second call must have no filters at all
+    second_call = mock_vs.hybrid_search.call_args_list[1].kwargs
+    assert second_call.get("tax_year") is None
+    assert second_call.get("doc_type") is None
+    assert second_call.get("form_numbers") is None
+    assert ctx is not None
+
+
+@pytest.mark.asyncio
+async def test_retrieve_router_error_falls_back_to_unfiltered() -> None:
+    """When the router raises RouterError, retrieve() runs unfiltered."""
+    import uuid
+
+    from core.retrieval import HybridRetriever
+
+    _PARENT_UUID = "00000000-0000-0000-0000-000000000001"
+    _CHILD_UUID = "00000000-0000-0000-0000-000000000002"
+
+    mock_hit = MagicMock()
+    mock_hit.child_id = _CHILD_UUID
+    mock_hit.parent_id = _PARENT_UUID
+    mock_hit.doc_id = "00000000-0000-0000-0000-000000000003"
+    mock_hit.rrf_score = 0.9
+    mock_hit.dense_top_score = 0.85
+
+    mock_vs = AsyncMock()
+    mock_vs.hybrid_search.return_value = [mock_hit]
+
+    mock_repo = AsyncMock()
+    mock_repo.fetch_parents.return_value = {
+        uuid.UUID(_PARENT_UUID): {
+            "doc_id": "00000000-0000-0000-0000-000000000003",
+            "text_content": "QBI phase-out starts at $182,100.",
+            "metadata": {"source_url": "https://irs.gov/pub/irs-pdf/p535.pdf"},
+        }
+    }
+
+    mock_embedder = AsyncMock()
+    mock_embedder.embed.return_value = tuple([0.1] * 1024)
+    mock_sparse = AsyncMock()
+    from qdrant_client.models import SparseVector
+    mock_sparse.embed_query.return_value = SparseVector(indices=[1], values=[1.0])
 
     from core.config import Settings
 
@@ -308,26 +460,27 @@ async def test_retrieve_procedural_tries_instruction_variant_first() -> None:
         qdrant_url="https://qdrant.example.com:6333",
         qdrant_api_key="x",
         retrieval_confidence_gate_enabled=False,
+        router_llm_provider="gemini",
+        router_llm_model="gemini-2.0-flash",
     )
 
-    retriever = HybridRetriever(
-        repository=mock_repo,
-        embedder=mock_embedder,
-        vector_store=mock_vs,
-        sparse_encoder=mock_sparse,
-        settings=settings,
-    )
+    with patch(
+        "core.retrieval.route_query",
+        new=AsyncMock(side_effect=RouterError("LLM timeout")),
+    ):
+        retriever = HybridRetriever(
+            repository=mock_repo,
+            embedder=mock_embedder,
+            vector_store=mock_vs,
+            sparse_encoder=mock_sparse,
+            settings=settings,
+        )
+        ctx = await retriever.retrieve("What were the 2023 QBI thresholds?")
 
-    query = (
-        "How does Form 2555 instruct a US citizen working abroad to determine "
-        "whether they meet the physical presence test?"
-    )
-    ctx = await retriever.retrieve(query)
-
-    # Confirm hybrid_search was called with instruction variant + doc_type
-    first_call_kwargs = mock_vs.hybrid_search.call_args_list[0].kwargs
-    assert first_call_kwargs.get("doc_type") == "instruction"
-    assert "Instruction 2555" in first_call_kwargs.get(
-        "form_number_variants", ()
-    )
+    # Should call hybrid_search once with no filters (router fallback)
+    assert mock_vs.hybrid_search.call_count == 1
+    call_kwargs = mock_vs.hybrid_search.call_args_list[0].kwargs
+    assert call_kwargs.get("tax_year") is None
+    assert call_kwargs.get("doc_type") is None
+    assert call_kwargs.get("form_numbers") is None
     assert ctx is not None

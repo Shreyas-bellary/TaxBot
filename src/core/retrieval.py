@@ -2,26 +2,32 @@
 
 Pipeline order:
 
-1. **Pre-filter**: extract structured metadata hints (``tax_year``,
-   ``form_number``, ``doc_type``) from the user query, then push them as
-   Qdrant payload filter conditions.
+1. **Query router**: :func:`~core.query_router.route_query` makes a single cheap
+   LLM call that simultaneously enforces the domain gate (raises
+   :class:`~core.errors.OutOfDomainQueryError` for off-topic queries) and
+   returns structured Qdrant filter hints (``tax_year``, ``doc_type``,
+   ``form_numbers``).  Router failures fall back to unfiltered retrieval.
 2. **Hybrid stage**: Qdrant ``query_points`` with a dense (cosine) prefetch
    and a sparse (BM25) prefetch, fused via Reciprocal Rank Fusion (RRF).
-3. **Layer 2 confidence gate**: reject weak/ambiguous retrievals based on the
-   top hit's dense cosine similarity (which is a 0-1 absolute relevance
-   measure, unlike the rank-based RRF score).
-4. **Parent expansion**: look up parent rows by primary key from Postgres,
-   deduplicate, and assemble a :class:`RetrievedContext` payload.
+3. **Filter relaxation**: if the filtered search returns no hits, retry once
+   with no filters.
+4. **Layer 2 confidence gate**: reject weak/ambiguous retrievals based on the
+   top hit's dense cosine similarity.
+5. **Parent expansion**: walk the RRF-ordered child list and collect unique
+   parent nodes up to ``retrieval_top_k_parents``.  Children that share a parent
+   naturally collapse, so the top-ranked parent is whichever one contains the
+   highest-RRF child.
+6. **Context assembly**: gather matched child IDs and source URLs for the
+   selected parents.
 
 The retrieved context is what the answer-generation stage actually sees.
 """
 
 from __future__ import annotations
 
-import re
+import asyncio
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from numbers import Real
 from uuid import UUID
 
@@ -29,97 +35,23 @@ from pydantic import HttpUrl
 from qdrant_client.models import SparseVector
 
 from core.config import Settings, get_settings
-from core.errors import OUT_OF_DOMAIN_MESSAGE, OutOfDomainQueryError, RetrievalError
+from core.errors import OUT_OF_DOMAIN_MESSAGE, OutOfDomainQueryError, RetrievalError, RouterError
 from core.logging_config import get_logger
 from core.models import ParentNode, RetrievedContext
+from core.query_router import QueryRouteResult, RouteFilters, route_query
 from core.repository import DocumentRepository
+from core.security import SanitizedQuery
 from core.vector_store import HybridSearchResult, QdrantVectorStore
 from ingestion.embeddings import HuggingFaceEmbedder
 from ingestion.sparse_encoder import SparseEncoder
 
 logger = get_logger(__name__)
 
-_TAX_YEAR_RE = re.compile(r"\b(?:tax\s+year\s+)?((?:19|20)\d{2})\b", re.IGNORECASE)
-_FORM_NUMBER_RE = re.compile(
-    r"\b(?:Form|Publication|Pub|Schedule)\s+([0-9A-Z][0-9A-Z\-]*(?:\s+[A-Z](?![a-z]))?)",
-    re.IGNORECASE,
-)
-_DOC_TYPE_HINTS: dict[str, str] = {
-    "instructions": "instruction",
-    "instruction": "instruction",
-    "publication": "publication",
-    "pub ": "publication",
-    "pub.": "publication",
-    "notice": "notice",
-}
-
-# Procedural-intent verbs: user is asking *how to do* something
-_PROCEDURAL_INTENT_RE = re.compile(
-    r"\b(?:instruct|how\s+(?:to|do|does|can|should|would)|determine|complete|fill\s+out|calculate|compute|figure)\b",
-    re.IGNORECASE,
-)
-
-_INSTRUCTION_DOC_PREFIX = "Instruction"
-
-@dataclass(frozen=True, slots=True)
-class QueryFilters:
-    """Structured filters extracted from a raw user query."""
-
-    tax_year: int | None
-    form_number: str | None
-    doc_type: str | None
-    form_number_variants: tuple[str, ...] = ()
-    procedural_intent: bool = False
-
-
-def _form_family_variants(prefix: str, body: str) -> tuple[str, ...]:
-    """Build Qdrant MatchAny labels for a Form/Schedule and its instruction PDF.
-    """
-    form_number = f"{prefix} {body}".strip()
-    if prefix in ("Form", "Schedule"):
-        return (form_number, f"{_INSTRUCTION_DOC_PREFIX} {body}")
-    return (form_number,)
-
-
-def extract_filters(query: str) -> QueryFilters:
-    """Best-effort extraction of metadata pre-filters from a natural query.
-    """
-
-    tax_year_match = _TAX_YEAR_RE.search(query)
-    tax_year = int(tax_year_match.group(1)) if tax_year_match else None
-
-    form_number: str | None = None
-    form_number_variants: tuple[str, ...] = ()
-    form_match = _FORM_NUMBER_RE.search(query)
-    if form_match:
-        prefix = form_match.group(0).split()[0].title()
-        body = form_match.group(1).strip().upper()
-        form_number = f"{prefix} {body}".strip()
-        form_number_variants = _form_family_variants(prefix, body)
-
-    lowered = query.lower()
-    doc_type: str | None = None
-    for hint, mapped in _DOC_TYPE_HINTS.items():
-        if hint in lowered:
-            doc_type = mapped
-            break
-
-    procedural_intent = bool(_PROCEDURAL_INTENT_RE.search(query))
-
-    return QueryFilters(
-        tax_year=tax_year,
-        form_number=form_number,
-        doc_type=doc_type,
-        form_number_variants=form_number_variants,
-        procedural_intent=procedural_intent,
-    )
-
 
 def _normalize_rows(
     results: list[HybridSearchResult],
 ) -> list[dict[str, object]]:
-    """Convert Qdrant search results into retrieval row dicts for the gate.
-    """
+    """Convert Qdrant search results into retrieval row dicts for the gate."""
     if not results:
         return []
 
@@ -143,7 +75,7 @@ def _normalize_rows(
 
 
 class HybridRetriever:
-    """Dense + BM25 hybrid retriever with Qdrant and parent expansion."""
+    """Dense + BM25 hybrid retriever with LLM routing and parent expansion."""
 
     def __init__(
         self,
@@ -160,71 +92,71 @@ class HybridRetriever:
         self._sparse_encoder = sparse_encoder
         self._settings = settings or get_settings()
 
-    async def retrieve(self, query: str) -> RetrievedContext:
-        """Run the hybrid retrieval pipeline for a single query."""
+    async def retrieve(
+        self,
+        query: str,
+        *,
+        sanitized: SanitizedQuery | None = None,
+    ) -> RetrievedContext:
+        """Run the full hybrid retrieval pipeline for a single query."""
 
         if not query or not query.strip():
             raise RetrievalError("Empty query")
 
-        filters = extract_filters(query)
         top_k = self._settings.retrieval_top_k_children
+
+        if sanitized is not None:
+            san = sanitized
+        else:
+            start = self._settings.user_query_start_tag
+            end = self._settings.user_query_end_tag
+            san = SanitizedQuery(
+                cleaned_text=query,
+                fenced_prompt_section=f"[{start}]\n{query}\n[{end}]",
+                start_tag=start,
+                end_tag=end,
+            )
+
+        route: QueryRouteResult | None = None
+        try:
+            route = await route_query(san, settings=self._settings)
+        except OutOfDomainQueryError:
+            raise
+        except RouterError as exc:
+            logger.warning(
+                "query_router_fallback",
+                error=str(exc),
+                query_preview=query[:120],
+            )
+            route = None
+
+        filters: RouteFilters = route.filters if route else RouteFilters()
 
         dense_embedding, sparse_vector = await _encode_query(
             query, self._embedder, self._sparse_encoder
         )
 
-        results: list[HybridSearchResult] = []
-        if (
-            filters.procedural_intent
-            and filters.form_number_variants
-            and filters.doc_type is None
-        ):
-            instruction_variant = next(
-                (
-                    v
-                    for v in filters.form_number_variants
-                    if v.startswith(f"{_INSTRUCTION_DOC_PREFIX} ")
-                ),
-                None,
-            )
-            if instruction_variant:
-                results = await self._vector_store.hybrid_search(
-                    dense_vector=dense_embedding,
-                    sparse_vector=sparse_vector,
-                    top_k=top_k,
-                    tax_year=filters.tax_year,
-                    form_number_variants=(instruction_variant,),
-                    doc_type="instruction",
-                )
-                if results:
-                    logger.info(
-                        "retrieval_procedural_instruction_hit",
-                        form_number=filters.form_number,
-                        instruction_variant=instruction_variant,
-                    )
-
-        if not results:
-            results = await self._vector_store.hybrid_search(
-                dense_vector=dense_embedding,
-                sparse_vector=sparse_vector,
-                top_k=top_k,
-                tax_year=filters.tax_year,
-                form_number=filters.form_number,
-                form_number_variants=filters.form_number_variants,
-                doc_type=filters.doc_type,
-            )
-
-        # if filters yielded nothing, retry with no filters.
-        if not results and (
+        has_filters = bool(
             filters.tax_year is not None
-            or filters.form_number is not None
             or filters.doc_type is not None
-        ):
+            or filters.form_numbers
+        )
+
+        results = await self._vector_store.hybrid_search(
+            dense_vector=dense_embedding,
+            sparse_vector=sparse_vector,
+            top_k=top_k,
+            tax_year=filters.tax_year,
+            doc_type=filters.doc_type,
+            form_numbers=filters.form_numbers,
+        )
+
+        if not results and has_filters:
             logger.info(
                 "retrieval_filter_relaxation",
                 tax_year=filters.tax_year,
-                form_number=filters.form_number,
                 doc_type=filters.doc_type,
+                form_numbers=filters.form_numbers,
             )
             results = await self._vector_store.hybrid_search(
                 dense_vector=dense_embedding,
@@ -242,42 +174,50 @@ class HybridRetriever:
             query_preview=query[:120],
         )
 
-        # Fetch parent rows from Postgres in one round-trip.
-        unique_parent_ids = list(
-            dict.fromkeys(UUID(r["parent_id"]) for r in rows)  # type: ignore[arg-type]
-        )
+        top_k_parents = self._settings.retrieval_top_k_parents
+        unique_parent_ids: list[UUID] = list(
+            dict.fromkeys(UUID(str(r["parent_id"])) for r in rows)
+        )[:top_k_parents]
+
         parent_records = await self._repo.fetch_parents(unique_parent_ids)
 
-        parents: OrderedDict[UUID, ParentNode] = OrderedDict()
+        selected_parents: OrderedDict[UUID, ParentNode] = OrderedDict()
+        for pid in unique_parent_ids:
+            record = parent_records.get(pid)
+            if record is None:
+                continue
+            parent_meta: dict[str, object] = record["metadata"]
+            selected_parents[pid] = ParentNode(
+                id=pid,
+                doc_id=UUID(str(record["doc_id"])),
+                text_content=str(record["text_content"]),
+                metadata=parent_meta,
+            )
+
+        # Collect all matched child IDs per selected parent.
+        child_ids_by_parent: dict[UUID, list[UUID]] = {
+            pid: [] for pid in selected_parents
+        }
+        for row in rows:
+            pid = UUID(str(row["parent_id"]))
+            cid = UUID(str(row["child_id"]))
+            if pid in child_ids_by_parent:
+                child_ids_by_parent[pid].append(cid)
+
         matched_child_ids: list[UUID] = []
         source_urls: list[HttpUrl] = []
         seen_source_urls: set[str] = set()
-        top_k_parents = self._settings.retrieval_top_k_parents
 
-        for row in rows:
-            parent_id = UUID(str(row["parent_id"]))
-            matched_child_ids.append(UUID(str(row["child_id"])))
-            if parent_id not in parents:
-                record = parent_records.get(parent_id)
-                if record is None:
-                    continue
-                parent_metadata: dict[str, object] = record["metadata"]
-                parents[parent_id] = ParentNode(
-                    id=parent_id,
-                    doc_id=UUID(str(record["doc_id"])),
-                    text_content=str(record["text_content"]),
-                    metadata=parent_metadata,
-                )
-                url = parent_metadata.get("source_url")
-                if isinstance(url, str) and url and url not in seen_source_urls:
-                    seen_source_urls.add(url)
-                    source_urls.append(HttpUrl(url))
-            if len(parents) >= top_k_parents:
-                break
+        for parent_id, parent_node in selected_parents.items():
+            matched_child_ids.extend(child_ids_by_parent.get(parent_id, []))
+            url = parent_node.metadata.get("source_url")
+            if isinstance(url, str) and url and url not in seen_source_urls:
+                seen_source_urls.add(url)
+                source_urls.append(HttpUrl(url))
 
         return RetrievedContext(
             query=query,
-            parent_nodes=tuple(parents.values()),
+            parent_nodes=tuple(selected_parents.values()),
             matched_child_ids=tuple(matched_child_ids),
             source_urls=tuple(source_urls),
         )
@@ -289,8 +229,6 @@ async def _encode_query(
     sparse_encoder: SparseEncoder,
 ) -> tuple[tuple[float, ...], SparseVector]:
     """Concurrently encode the query for both dense and sparse retrieval."""
-    import asyncio
-
     dense_task = asyncio.ensure_future(embedder.embed(query))
     sparse_task = asyncio.ensure_future(sparse_encoder.embed_query(query))
     dense_embedding, sparse_vector = await asyncio.gather(dense_task, sparse_task)
@@ -304,6 +242,9 @@ def assess_retrieval_confidence(
     query_preview: str,
 ) -> None:
     """Raise :class:`OutOfDomainQueryError` if retrieval confidence is weak.
+
+    This is the Layer 2 hybrid-score gate.  It runs after retrieval and before
+    the answer LLM, complementing the router's Layer 1 domain check.
     """
     if not settings.retrieval_confidence_gate_enabled or not rows:
         return

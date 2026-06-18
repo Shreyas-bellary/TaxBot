@@ -116,7 +116,9 @@ class AnswerGenerator:
 
         sanitized = self._input_guard.sanitize(raw_query)
         try:
-            context = await self._retriever.retrieve(sanitized.cleaned_text)
+            context = await self._retriever.retrieve(
+                sanitized.cleaned_text, sanitized=sanitized
+            )
         except RetrievalError:
             raise
         prompt = render_prompt(sanitized=sanitized, context=context)

@@ -53,6 +53,10 @@ class RetrievalError(TaxBotError):
     """Raised when the hybrid retrieval pipeline cannot produce a context payload."""
 
 
+class RouterError(TaxBotError):
+    """Raised when the query router LLM returns an unparseable or invalid response."""
+
+
 class SecurityError(TaxBotError):
     """Base class for OWASP-aligned guardrail violations."""
 

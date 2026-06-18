@@ -52,11 +52,10 @@ _PAYLOAD_INDEXES: tuple[tuple[str, models.PayloadSchemaType], ...] = (
 def _build_metadata_filter(
     *,
     tax_year: int | None,
-    form_number: str | None,
     doc_type: str | None,
-    form_number_variants: tuple[str, ...] = (),
+    form_numbers: list[str] | None = None,
 ) -> models.Filter | None:
-    """Convert metadata filter values into a Qdrant :class:`~qdrant_client.models.Filter`.
+    """Convert LLM router filter hints into a Qdrant :class:`~qdrant_client.models.Filter`.
 
     Returns ``None`` when all inputs are ``None`` / empty (no filter applied).
     The fields must match the payload keys written during ingest.
@@ -69,21 +68,21 @@ def _build_metadata_filter(
                 match=models.MatchValue(value=tax_year),
             )
         )
-    if form_number_variants:
-        # Match the entire form family: blank form + instructions for that form.
-        conditions.append(
-            models.FieldCondition(
-                key="form_number",
-                match=models.MatchAny(any=list(form_number_variants)),
+    if form_numbers:
+        if len(form_numbers) == 1:
+            conditions.append(
+                models.FieldCondition(
+                    key="form_number",
+                    match=models.MatchValue(value=form_numbers[0]),
+                )
             )
-        )
-    elif form_number is not None:
-        conditions.append(
-            models.FieldCondition(
-                key="form_number",
-                match=models.MatchValue(value=form_number),
+        else:
+            conditions.append(
+                models.FieldCondition(
+                    key="form_number",
+                    match=models.MatchAny(any=form_numbers),
+                )
             )
-        )
     if doc_type is not None:
         conditions.append(
             models.FieldCondition(
@@ -322,9 +321,8 @@ class QdrantVectorStore:
         sparse_vector: models.SparseVector,
         top_k: int,
         tax_year: int | None = None,
-        form_number: str | None = None,
         doc_type: str | None = None,
-        form_number_variants: tuple[str, ...] = (),
+        form_numbers: list[str] | None = None,
     ) -> list[HybridSearchResult]:
         """Run Qdrant hybrid search (dense cosine + BM25 sparse, RRF fusion).
 
@@ -335,9 +333,8 @@ class QdrantVectorStore:
         """
         query_filter = _build_metadata_filter(
             tax_year=tax_year,
-            form_number=form_number,
             doc_type=doc_type,
-            form_number_variants=form_number_variants,
+            form_numbers=form_numbers,
         )
         filtered = query_filter is not None
 
@@ -360,7 +357,7 @@ class QdrantVectorStore:
         rrf_response = await self._client.query_points(
             collection_name=self._settings.qdrant_collection,
             prefetch=prefetch,
-            query=models.FusionQuery(fusion=models.Fusion.RRF),
+            query=models.RrfQuery(rrf=models.Rrf(k=self._settings.retrieval_rrf_k)),
             limit=top_k,
             with_payload=True,
         )

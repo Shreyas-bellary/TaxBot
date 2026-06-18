@@ -96,6 +96,18 @@ class Settings(BaseSettings):
         description="Final answer model identifier.",
     )
 
+    router_llm_provider: AnswerProvider = Field(
+        default="gemini",
+        description=(
+            "LLM provider for the query router (domain gate + filter extraction). "
+            "Use a cheap/fast model; the router call precedes every retrieval."
+        ),
+    )
+    router_llm_model: str = Field(
+        default="gemini-2.0-flash",
+        description="Model id for the query router LLM.",
+    )
+
     eval_judge_provider: AnswerProvider = Field(
         default="gemini",
         description="Provider used by the Ragas evaluation judge LLM.",
@@ -251,10 +263,12 @@ class Settings(BaseSettings):
         description="Number of candidate child nodes fetched from Qdrant per retrieval pass.",
     )
     retrieval_top_k_parents: int = Field(
-        default=3,
+        default=6,
         ge=1,
         le=50,
-        description="Maximum unique parent nodes assembled into RetrievedContext.",
+        description=(
+            "Maximum unique parent nodes assembled into RetrievedContext"
+        ),
     )
     retrieval_rrf_k: int = Field(
         default=60,
