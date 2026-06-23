@@ -1,8 +1,8 @@
 import { ExternalLink, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 
-import { sourceBadges, sourceTitle } from "../lib/sources";
-import { metaString, type CitedParent } from "../lib/types";
+import { sourceTitle } from "../lib/sources";
+import { metaNumber, metaString, type CitedParent } from "../lib/types";
 
 export interface DrawerState {
   sources: CitedParent[];
@@ -16,14 +16,16 @@ interface SourceDrawerProps {
 
 export function SourceDrawer({ state, onClose }: SourceDrawerProps) {
   const anchorRef = useRef<HTMLElement | null>(null);
+  const orderedSources = [
+    ...state.sources.filter((source) => source.parent_id === state.anchorId),
+    ...state.sources.filter((source) => source.parent_id !== state.anchorId),
+  ];
 
-  // Scroll the anchored source into view and flash-highlight it.
   useEffect(() => {
     const target = anchorRef.current;
     if (!target) return;
     target.scrollIntoView({ block: "start", behavior: "instant" });
     target.classList.remove("anchor-flash");
-    // Force a reflow so the animation restarts when re-anchoring.
     void target.offsetWidth;
     target.classList.add("anchor-flash");
   }, [state.anchorId]);
@@ -42,64 +44,78 @@ export function SourceDrawer({ state, onClose }: SourceDrawerProps) {
         type="button"
         aria-label="Close source panel"
         onClick={onClose}
-        className="absolute inset-0 cursor-default bg-black/25"
+        className="source-drawer-backdrop absolute inset-0 cursor-default bg-black/25"
       />
-      <div className="absolute bottom-0 right-0 top-0 flex w-full max-w-xl flex-col border-l border-border bg-surface shadow-xl">
-        <header className="flex items-center justify-between border-b border-border px-5 py-3.5">
-          <h2 className="text-[15px] font-semibold">
-            Sources ({state.sources.length})
+      <div className="source-drawer-panel absolute bottom-0 right-0 top-0 flex w-full max-w-md flex-col border-l border-border bg-surface shadow-xl">
+        <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
+          <h2 className="text-[14px] font-semibold tracking-tight text-ink">
+            Sources
+            <span className="ml-1.5 font-normal text-ink-faint">
+              ({state.sources.length})
+            </span>
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-lg p-1.5 text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+            className="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink"
           >
-            <X size={17} />
+            <X size={16} />
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          {state.sources.map((source) => {
+        <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-3 py-2.5">
+          {orderedSources.map((source) => {
             const isAnchor = source.parent_id === state.anchorId;
             const sourceUrl = metaString(source.metadata, "source_url");
+            const docTitle = metaString(source.metadata, "doc_title");
+            const docNumber = metaString(source.metadata, "doc_number");
+            const taxYear = metaNumber(source.metadata, "tax_year");
+            const title = sourceTitle(source);
+            const showDocNumber = docNumber !== null && docNumber !== docTitle;
+
+            const metaParts: string[] = [];
+            if (showDocNumber && docNumber) metaParts.push(docNumber);
+            if (taxYear !== null) metaParts.push(`Tax year ${taxYear}`);
+
             return (
               <article
                 key={source.parent_id}
                 ref={isAnchor ? (node) => void (anchorRef.current = node) : undefined}
-                className={`mb-4 scroll-mt-4 rounded-xl border p-4 ${
-                  isAnchor ? "border-accent" : "border-border"
+                className={`source-card relative scroll-mt-2 rounded-lg py-2 pl-3.5 pr-3 transition-colors ${
+                  isAnchor
+                    ? "bg-surface-2"
+                    : "hover:bg-surface-2/60"
                 }`}
               >
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <h3 className="text-[14px] font-semibold text-ink">
-                    {sourceTitle(source)}
-                  </h3>
-                  {sourceBadges(source).map((badge) => (
-                    <span
-                      key={badge}
-                      className="rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-muted"
-                    >
-                      {badge}
-                    </span>
-                  ))}
-                </div>
+                {isAnchor && (
+                  <span
+                    aria-hidden
+                    className="absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-accent"
+                  />
+                )}
+
+                <h3 className="pr-1 text-[13.5px] font-medium leading-snug text-ink">
+                  {title}
+                </h3>
+
+                {metaParts.length > 0 && (
+                  <p className="mt-0.5 text-[12px] leading-snug text-ink-muted">
+                    {metaParts.join(" · ")}
+                  </p>
+                )}
 
                 {sourceUrl && (
                   <a
                     href={sourceUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-1.5 inline-flex items-center gap-1 text-[12.5px] text-accent hover:text-accent-hover"
+                    className="mt-1.5 inline-flex items-center gap-1 text-[11.5px] font-medium text-accent transition-colors hover:text-accent-hover"
                   >
-                    View on irs.gov
-                    <ExternalLink size={12} />
+                    irs.gov
+                    <ExternalLink size={11} strokeWidth={2} />
                   </a>
                 )}
-
-                <p className="mt-3 whitespace-pre-wrap border-t border-border pt-3 text-[13.5px] leading-relaxed text-ink">
-                  {source.text_content}
-                </p>
               </article>
             );
           })}

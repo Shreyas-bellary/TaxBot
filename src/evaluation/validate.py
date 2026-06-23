@@ -33,6 +33,7 @@ from core.generation import AnswerGenerator
 from core.logging_config import configure_logging, get_logger
 from core.models import GenerationResult, RetrievedContext
 from core.repository import DocumentRepository
+from core.reranker import ChildReranker
 from core.retrieval import HybridRetriever
 from core.security import OutputGuard
 from core.vector_store import QdrantVectorStore
@@ -149,7 +150,7 @@ def _create_gemini_ragas_llm(*, model_id: str, api_key: str) -> BaseRagasLLM:
         response_mime_type="text/plain",
     )
 
-    class _GeminiRagasLLM(BaseRagasLLM):
+    class _GeminiRagasLLM(BaseRagasLLM):  # type: ignore[misc]
         def generate_text(
             self,
             prompt: PromptValue,
@@ -190,8 +191,17 @@ def _create_gemini_ragas_llm(*, model_id: str, api_key: str) -> BaseRagasLLM:
 def _prompt_to_text(prompt: PromptValue) -> str:
     to_string = getattr(prompt, "to_string", None)
     if callable(to_string):
-        return to_string()
+        return str(to_string())
     return str(prompt)
+
+
+def _make_reranker(settings: Settings) -> ChildReranker | None:
+    if not settings.reranker_enabled:
+        return None
+    return ChildReranker(
+        settings.reranker_model_path,
+        hf_token=settings.huggingface_api_token.get_secret_value(),
+    )
 
 
 async def run_pipeline(
@@ -216,6 +226,7 @@ async def run_pipeline(
             embedder,
             vector_store,
             sparse_encoder,
+            reranker=_make_reranker(settings),
             settings=settings,
         )
         generator = AnswerGenerator(
@@ -302,7 +313,7 @@ def _make_judge_llm(settings: Settings):  # type: ignore[no-untyped-def]
         from ragas.llms import LangchainLLMWrapper
 
         return LangchainLLMWrapper(
-            ChatOpenAI(
+            ChatOpenAI(  # type: ignore[call-arg]
                 model=settings.eval_judge_model,
                 api_key=settings.openrouter_api_key.get_secret_value(),
                 base_url="https://openrouter.ai/api/v1",
@@ -404,6 +415,7 @@ async def inspect_case(
             embedder,
             vector_store,
             sparse_encoder,
+            reranker=_make_reranker(settings),
             settings=settings,
         )
         generator = AnswerGenerator(

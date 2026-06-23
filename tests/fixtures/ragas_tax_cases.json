@@ -3,18 +3,18 @@
   "description": "20 multi-layered US tax edge cases used by the Ragas evaluation gate.",
   "cases": [
     {
-      "id": "case_01_standard_deduction_mfj_2024",
-      "question": "For tax year 2024, what is the standard deduction for a married couple filing jointly where both spouses are under 65 and not blind?",
+      "id": "case_01_standard_deduction_mfj_2025",
+      "question": "For tax year 2025, what is the standard deduction for a married couple filing jointly where both spouses are under 65 and not blind?",
       "expected_doc_numbers": ["Publication 17", "Form 1040 Instructions"],
-      "expected_tax_year": 2024,
-      "ground_truth": "For tax year 2024, the standard deduction for married couples filing jointly is $29,200 when both spouses are under 65 and not blind."
+      "expected_tax_year": 2025,
+      "ground_truth": "For tax year 2025, the standard deduction for married couples filing jointly is $31,500 when both spouses are under 65 and not blind."
     },
     {
-      "id": "case_02_qbi_threshold_2023",
-      "question": "What were the 2023 taxable-income thresholds at which the Section 199A QBI deduction begins to phase out for a single filer who is in a specified service trade or business?",
+      "id": "case_02_qbi_threshold_2025",
+      "question": "What are the 2025 taxable-income thresholds at which the Section 199A QBI deduction begins to phase out for a single filer who is in a specified service trade or business?",
       "expected_doc_numbers": ["Publication 535", "Form 8995-A Instructions"],
-      "expected_tax_year": 2023,
-      "ground_truth": "For tax year 2023, a single filer in a specified service trade or business begins the Section 199A QBI deduction phase-out at $182,100 of taxable income and is fully phased out at $232,100."
+      "expected_tax_year": 2025,
+      "ground_truth": "For tax year 2025, a single filer in a specified service trade or business begins the Section 199A QBI deduction phase-out at $197,300 of taxable income and is fully phased out at $247,300."
     },
     {
       "id": "case_03_form_2555_pe_test",
@@ -24,11 +24,11 @@
       "ground_truth": "Form 2555 instructs that the physical presence test is met if a US citizen is physically present in a foreign country (or countries) for at least 330 full days during any 12 consecutive months."
     },
     {
-      "id": "case_04_amt_exemption_2022",
-      "question": "For 2022, what was the AMT exemption amount for a married couple filing jointly, and at what AMTI does that exemption begin to phase out?",
+      "id": "case_04_amt_exemption_2025",
+      "question": "For 2025, what is the AMT exemption amount for a married couple filing jointly, and at what AMTI does that exemption begin to phase out?",
       "expected_doc_numbers": ["Form 6251 Instructions"],
-      "expected_tax_year": 2022,
-      "ground_truth": "For 2022, the AMT exemption for married filing jointly was $118,100 and it began to phase out at AMTI of $1,079,800."
+      "expected_tax_year": 2025,
+      "ground_truth": "For 2025, the AMT exemption for married filing jointly is $137,000 and it begins to phase out at AMTI of $1,252,700."
     },
     {
       "id": "case_05_form_1116_high_tax_kickout",
@@ -60,10 +60,10 @@
     },
     {
       "id": "case_09_research_credit_section_174",
-      "question": "Following the TCJA-era change to Section 174, how must a calendar-year corporation amortize specified research or experimental expenditures incurred in 2024?",
+      "question": "Following the TCJA-era change to Section 174, how must a calendar-year corporation amortize specified research or experimental expenditures?",
       "expected_doc_numbers": ["Publication 535", "Form 6765 Instructions"],
-      "expected_tax_year": 2024,
-      "ground_truth": "For 2024, Section 174 requires specified research or experimental expenditures incurred in the US to be capitalized and amortized straight-line over 5 years, and foreign research over 15 years, beginning with the midpoint of the year of expenditure."
+      "expected_tax_year": null,
+      "ground_truth": "Section 174 requires specified research or experimental expenditures incurred in the US to be capitalized and amortized straight-line over 5 years, and foreign research over 15 years, beginning with the midpoint of the year of expenditure."
     },
     {
       "id": "case_10_form_5471_category_4",
@@ -73,11 +73,11 @@
       "ground_truth": "A US person who acquires more than 10% and reaches at least 50% ownership of a foreign corporation is a Category 4 filer of Form 5471."
     },
     {
-      "id": "case_11_qcd_age_70_5",
-      "question": "What are the eligibility, dollar cap, and reporting requirements for a Qualified Charitable Distribution from an IRA in 2024?",
+      "id": "case_11_qcd_2025",
+      "question": "What are the eligibility, dollar cap, and reporting requirements for a Qualified Charitable Distribution from an IRA in 2025?",
       "expected_doc_numbers": ["Publication 590-B"],
-      "expected_tax_year": 2024,
-      "ground_truth": "For 2024, an IRA owner age 70 1/2 or older may make a Qualified Charitable Distribution of up to $105,000 directly to a qualified charity; the QCD is excluded from gross income and reported on Form 1040 line 4b as a zero taxable amount with QCD noted."
+      "expected_tax_year": 2025,
+      "ground_truth": "For 2025, an IRA owner age 70 1/2 or older may make a Qualified Charitable Distribution of up to $108,000 directly to a qualified charity; the QCD is excluded from gross income and reported on Form 1040 line 4b as a zero taxable amount with QCD noted."
     },
     {
       "id": "case_12_section_121_exclusion_partial",
@@ -94,11 +94,11 @@
       "ground_truth": "For US-resident MFJ filers, Form 8938 is required when the aggregate value of specified foreign financial assets exceeds $100,000 on the last day of the year or $150,000 at any time during the year."
     },
     {
-      "id": "case_14_eitc_qualifying_child_2024",
-      "question": "What residency, age, and joint-return restrictions must be satisfied for a child to be a 'qualifying child' for the 2024 Earned Income Tax Credit?",
+      "id": "case_14_eitc_qualifying_child",
+      "question": "What residency, age, and joint-return restrictions must be satisfied for a child to be a 'qualifying child' for the Earned Income Tax Credit?",
       "expected_doc_numbers": ["Publication 596", "Form 1040 Instructions"],
-      "expected_tax_year": 2024,
-      "ground_truth": "For the 2024 EITC, a qualifying child must live with the taxpayer in the US for more than half the year, be under 19 (under 24 if a full-time student) or any age if permanently disabled, and not file a joint return except to claim a refund."
+      "expected_tax_year": null,
+      "ground_truth": "A qualifying child must live with the taxpayer in the US for more than half the year, be under 19 (under 24 if a full-time student) or any age if permanently disabled, and not file a joint return except to claim a refund."
     },
     {
       "id": "case_15_section_1202_qsbs",
@@ -108,18 +108,18 @@
       "ground_truth": "Section 1202 requires that the stock be acquired at original issue from a domestic C corporation whose gross assets did not exceed $50 million at issuance, and that the taxpayer hold the stock for more than five years."
     },
     {
-      "id": "case_16_form_4562_section_179_2024",
-      "question": "What are the 2024 Section 179 expense limit and the investment-in-property phase-out threshold, and how are they reported on Form 4562?",
+      "id": "case_16_form_4562_section_179_2025",
+      "question": "What are the 2025 Section 179 expense limit and the investment-in-property phase-out threshold, and how are they reported on Form 4562?",
       "expected_doc_numbers": ["Form 4562 Instructions"],
-      "expected_tax_year": 2024,
-      "ground_truth": "For 2024, the Section 179 maximum expense is $1,160,000 and it phases out dollar-for-dollar once qualifying property placed in service exceeds $2,890,000, reported in Part I of Form 4562."
+      "expected_tax_year": 2025,
+      "ground_truth": "For 2025, the Section 179 maximum expense is $2,500,000 and it phases out dollar-for-dollar once qualifying property placed in service exceeds $4,000,000, reported in Part I of Form 4562."
     },
     {
       "id": "case_17_clean_vehicle_credit_8936",
-      "question": "What two pricing limits and which buyer income caps apply to the 2024 Clean Vehicle Credit reported on Form 8936?",
+      "question": "What two pricing limits and which buyer income caps apply to the Clean Vehicle Credit reported on Form 8936?",
       "expected_doc_numbers": ["Form 8936 Instructions"],
-      "expected_tax_year": 2024,
-      "ground_truth": "For 2024, the Clean Vehicle Credit applies to vans, SUVs and pickups with MSRP up to $80,000 and other vehicles up to $55,000, with modified AGI caps of $300,000 MFJ, $225,000 head of household, and $150,000 single."
+      "expected_tax_year": null,
+      "ground_truth": "The Clean Vehicle Credit applies to vans, SUVs and pickups with MSRP up to $80,000 and other vehicles up to $55,000, with modified AGI caps of $300,000 MFJ, $225,000 head of household, and $150,000 single."
     },
     {
       "id": "case_18_form_8283_appraisal",

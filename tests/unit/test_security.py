@@ -8,7 +8,7 @@ import pytest
 
 from core.errors import InjectionDetectedError, OutputCitationError
 from core.models import ParentNode, RetrievedContext
-from core.security import InputGuard, OutputGuard
+from core.security import NOT_FOUND_ANSWER, InputGuard, OutputGuard
 
 
 @pytest.mark.parametrize(
@@ -59,6 +59,14 @@ def _ctx(parent_url: str = "https://www.irs.gov/pub/irs-pdf/f1040.pdf") -> Retri
     )
 
 
+def test_output_guard_accepts_not_found_fallback_without_citation() -> None:
+    guard = OutputGuard()
+    result = guard.validate(answer=NOT_FOUND_ANSWER, context=_ctx())
+    assert result.answer == NOT_FOUND_ANSWER
+    assert result.citations == ()
+    assert result.used_parent_ids == ()
+
+
 def test_output_guard_requires_citation() -> None:
     guard = OutputGuard()
     with pytest.raises(OutputCitationError):
@@ -68,19 +76,25 @@ def test_output_guard_requires_citation() -> None:
 def test_output_guard_accepts_cited_answer() -> None:
     url = "https://www.irs.gov/pub/irs-pdf/f1040.pdf"
     guard = OutputGuard()
-    answer = (
-        f"The 2024 MFJ standard deduction is $29,200 "
-        f"(see {url})."
-    )
+    answer = "The 2024 MFJ standard deduction is $29,200 [Doc-1]."
     result = guard.validate(answer=answer, context=_ctx(url))
     assert result.answer == answer
     assert any(str(c) == url for c in result.citations)
 
 
+def test_output_guard_rejects_answer_without_doc_citation() -> None:
+    guard = OutputGuard()
+    with pytest.raises(OutputCitationError):
+        guard.validate(
+            answer="The deduction is $29,200.",
+            context=_ctx(),
+        )
+
+
 def test_output_guard_blocks_fence_leakage() -> None:
     guard = OutputGuard()
     raw = (
-        "Answer (see https://www.irs.gov/pub/irs-pdf/f1040.pdf). "
+        "Answer [Doc-1]. "
         f"[{guard._settings.user_query_start_tag}]"  # type: ignore[attr-defined]
     )
     with pytest.raises(OutputCitationError):

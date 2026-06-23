@@ -96,6 +96,18 @@ class Settings(BaseSettings):
         description="Final answer model identifier.",
     )
 
+    router_llm_provider: AnswerProvider = Field(
+        default="gemini",
+        description=(
+            "LLM provider for the query router (domain gate + filter extraction). "
+            "Use a cheap/fast model; the router call precedes every retrieval."
+        ),
+    )
+    router_llm_model: str = Field(
+        default="gemini-2.0-flash",
+        description="Model id for the query router LLM.",
+    )
+
     eval_judge_provider: AnswerProvider = Field(
         default="gemini",
         description="Provider used by the Ragas evaluation judge LLM.",
@@ -245,7 +257,7 @@ class Settings(BaseSettings):
         description="fastembed sparse model used for BM25 keyword retrieval.",
     )
     retrieval_top_k_children: int = Field(
-        default=24,
+        default=12,
         ge=1,
         le=200,
         description="Number of candidate child nodes fetched from Qdrant per retrieval pass.",
@@ -254,7 +266,9 @@ class Settings(BaseSettings):
         default=6,
         ge=1,
         le=50,
-        description="Maximum unique parent nodes assembled into RetrievedContext.",
+        description=(
+            "Maximum unique parent nodes assembled into RetrievedContext"
+        ),
     )
     retrieval_rrf_k: int = Field(
         default=60,
@@ -277,6 +291,28 @@ class Settings(BaseSettings):
         ge=0.0,
         le=1.0,
         description="Optional minimum top1-top2 hybrid_score gap; rejects ambiguous matches.",
+    )
+
+    # --- Reranker ---
+    reranker_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the cross-encoder rerank step after Qdrant RRF and before parent expansion. "
+            "Requires reranker_model_path to point to the fine-tuned LoRA adapter directory."
+        ),
+    )
+    reranker_model_path: str = Field(
+        default="scripts/finetuned_model",
+        description=(
+            "Path to the fine-tuned LoRA adapter directory "
+            "(must contain adapter_config.json and adapter_model.safetensors)."
+        ),
+    )
+    reranker_top_k: int = Field(
+        default=12,
+        ge=1,
+        le=200,
+        description="Number of child nodes to keep after reranking (before parent expansion).",
     )
 
     faithfulness_threshold: float = Field(default=0.92, ge=0.0, le=1.0)

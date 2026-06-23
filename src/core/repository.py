@@ -197,6 +197,24 @@ class DocumentRepository:
     # retrieval queries
     # ------------------------------------------------------------------
 
+    async def fetch_children_text(
+        self, child_ids: Sequence[UUID]
+    ) -> dict[UUID, str]:
+        """Fetch ``text_summary`` for the given child IDs in one round-trip.
+        Returns a mapping from ``child_id`` → ``text_summary`` string.
+        """
+        if not child_ids:
+            return {}
+        rows = await self._db.fetch(
+            """
+            SELECT id, text_summary
+            FROM child_nodes
+            WHERE id = ANY($1::uuid[])
+            """,
+            [str(cid) for cid in child_ids],
+        )
+        return {UUID(str(row["id"])): str(row["text_summary"]) for row in rows}
+
     async def fetch_parents(
         self, parent_ids: Sequence[UUID]
     ) -> dict[UUID, dict[str, Any]]:

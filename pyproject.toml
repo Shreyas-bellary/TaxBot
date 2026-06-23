@@ -51,6 +51,11 @@ python-dotenv = "^1.0.1"
 tqdm = "^4.67.0"
 orjson = "^3.10.11"
 
+# Reranker
+torch = ">=2.0"
+transformers = ">=4.40"
+peft = ">=0.10"
+
 # API surface 
 fastapi = "^0.115.5"
 uvicorn = { extras = ["standard"], version = "^0.32.1" }

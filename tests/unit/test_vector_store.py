@@ -12,12 +12,12 @@ from core.vector_store import _PAYLOAD_INDEXES, _build_metadata_filter, _is_qdra
 
 
 def test_filter_all_none_returns_none() -> None:
-    result = _build_metadata_filter(tax_year=None, form_number=None, doc_type=None)
+    result = _build_metadata_filter(tax_year=None, doc_type=None, form_numbers=None)
     assert result is None
 
 
 def test_filter_tax_year_only() -> None:
-    result = _build_metadata_filter(tax_year=2024, form_number=None, doc_type=None)
+    result = _build_metadata_filter(tax_year=2024, doc_type=None)
     assert result is not None
     assert len(result.must) == 1  # type: ignore[arg-type]
     cond = result.must[0]  # type: ignore[index]
@@ -27,7 +27,7 @@ def test_filter_tax_year_only() -> None:
 
 def test_filter_multiple_conditions() -> None:
     result = _build_metadata_filter(
-        tax_year=2023, form_number="Form 1040", doc_type="form"
+        tax_year=2023, form_numbers=["Form 1040"], doc_type="form"
     )
     assert result is not None
     assert len(result.must) == 3  # type: ignore[arg-type]
@@ -37,7 +37,7 @@ def test_filter_multiple_conditions() -> None:
 
 def test_filter_form_number_only() -> None:
     result = _build_metadata_filter(
-        tax_year=None, form_number="Publication 535", doc_type=None
+        tax_year=None, form_numbers=["Publication 535"], doc_type=None
     )
     assert result is not None
     assert len(result.must) == 1  # type: ignore[arg-type]

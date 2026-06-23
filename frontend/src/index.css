@@ -239,12 +239,12 @@ body {
     background: var(--accent-soft);
   }
   100% {
-    background: transparent;
+    background: var(--surface-2);
   }
 }
 
 .anchor-flash {
-  animation: anchor-flash 1.6s ease-out;
+  animation: anchor-flash 1.2s ease-out;
 }
 
 /* Welcome screen entrance. */
@@ -283,6 +283,42 @@ body {
   animation: suggestion-enter 0.35s ease-out both;
 }
 
+@keyframes drawer-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes drawer-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.source-drawer-backdrop {
+  animation: drawer-backdrop-in 0.25s ease-out both;
+}
+
+.source-drawer-panel {
+  animation: drawer-panel-in 0.32s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.citation-chip {
+  vertical-align: middle;
+}
+
+.markdown .citation-chip {
+  text-decoration: none;
+}
+
 .sidebar-btn {
   outline: none;
 }
@@ -304,7 +340,9 @@ body {
   .suggestion-link,
   .disclaimer-fade,
   .sidebar-panel,
-  .composer-dock {
+  .composer-dock,
+  .source-drawer-backdrop,
+  .source-drawer-panel {
     animation: none !important;
     transition: none !important;
   }
