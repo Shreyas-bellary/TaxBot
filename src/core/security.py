@@ -10,9 +10,11 @@ Two guards are implemented:
   user content as system instructions.
 
 * :class:`OutputGuard` evaluates LLM completions before they leave the
-  service. It requires every answer to (a) cite a known IRS URL from the
-  retrieved context and (b) avoid leaking the user-query fences. Failures
-  are converted into :class:`OutputCitationError` so callers can fail safe.
+  service. It requires every answer to (a) cite at least one ``[Doc-N]``
+  chunk ID that maps to a context parent, except the canonical
+  :data:`NOT_FOUND_ANSWER` fallback, or (b) avoid leaking the user-query
+  fences. Failures are converted into :class:`OutputCitationError` so
+  callers can fail safe.
 """
 
 from __future__ import annotations
@@ -31,8 +33,13 @@ from core.models import GenerationResult, RetrievedContext
 
 logger = get_logger(__name__)
 
+# Matches [Doc-1], [Doc-12], etc.
+_DOC_CITATION_RE = re.compile(r"\[Doc-(\d+)\]")
+NOT_FOUND_ANSWER: Final[str] = (
+    "I could not find an authoritative answer in the retrieved IRS documents."
+)
 MAX_QUERY_LENGTH: Final[int] = 2_000
-MIN_QUERY_LENGTH: Final[int] = 3
+MIN_QUERY_LENGTH: Final[int] = 10
 
 # Curated prompt-injection signatures. The regexes are deliberately
 # case-insensitive and word-boundary aware so polite variants ("Please
@@ -142,24 +149,42 @@ class OutputGuard:
         if self._settings.user_query_start_tag in answer or self._settings.user_query_end_tag in answer:
             raise OutputCitationError("Completion leaked the user-query fence tags")
 
+        if answer.strip() == NOT_FOUND_ANSWER:
+            return GenerationResult(
+                answer=NOT_FOUND_ANSWER,
+                citations=(),
+                used_parent_ids=(),
+            )
+
+        # Map [Doc-N] chunk IDs cited in the answer back to source URLs.
+        cited_indices = {
+            int(m.group(1))
+            for m in _DOC_CITATION_RE.finditer(answer)
+        }
+        parents = context.parent_nodes
         cited_urls: list[HttpUrl] = []
         used_parents: list[UUID] = []
-        for parent in context.parent_nodes:
-            source_url = parent.metadata.get("source_url")
-            if not isinstance(source_url, str):
+        seen_urls: set[str] = set()
+        for idx in sorted(cited_indices):
+            if idx < 1 or idx > len(parents):
                 continue
-            if source_url in answer:
+            parent = parents[idx - 1]
+            source_url = parent.metadata.get("source_url")
+            if not isinstance(source_url, str) or not source_url:
+                continue
+            used_parents.append(parent.id)
+            if source_url not in seen_urls:
+                seen_urls.add(source_url)
                 cited_urls.append(HttpUrl(source_url))
-                used_parents.append(parent.id)
 
         if not cited_urls:
             logger.warning(
                 "output_citation_missing",
                 query_preview=context.query[:120],
-                allowed_urls=[str(u) for u in context.source_urls],
+                allowed_doc_ids=[f"Doc-{i}" for i in range(1, len(parents) + 1)],
             )
             raise OutputCitationError(
-                "Completion did not cite any retrieved source URL"
+                "Completion did not cite any [Doc-N] chunk ID"
             )
 
         return GenerationResult(

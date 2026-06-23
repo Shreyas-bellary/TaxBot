@@ -293,6 +293,28 @@ class Settings(BaseSettings):
         description="Optional minimum top1-top2 hybrid_score gap; rejects ambiguous matches.",
     )
 
+    # --- Reranker ---
+    reranker_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the cross-encoder rerank step after Qdrant RRF and before parent expansion. "
+            "Requires reranker_model_path to point to the fine-tuned LoRA adapter directory."
+        ),
+    )
+    reranker_model_path: str = Field(
+        default="scripts/finetuned_model",
+        description=(
+            "Path to the fine-tuned LoRA adapter directory "
+            "(must contain adapter_config.json and adapter_model.safetensors)."
+        ),
+    )
+    reranker_top_k: int = Field(
+        default=12,
+        ge=1,
+        le=200,
+        description="Number of child nodes to keep after reranking (before parent expansion).",
+    )
+
     faithfulness_threshold: float = Field(default=0.92, ge=0.0, le=1.0)
     answer_relevancy_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     context_precision_threshold: float = Field(default=0.85, ge=0.0, le=1.0)

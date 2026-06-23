@@ -13,11 +13,13 @@ Pipeline order:
    with no filters.
 4. **Layer 2 confidence gate**: reject weak/ambiguous retrievals based on the
    top hit's dense cosine similarity.
-5. **Parent expansion**: walk the RRF-ordered child list and collect unique
-   parent nodes up to ``retrieval_top_k_parents``.  Children that share a parent
+5. **Cross-encoder rerank**: score each child against the query with
+   a fine-tuned LoRA cross-encoder and re-order before parent expansion.
+6. **Parent expansion**: walk the reranked child list and collect unique parent
+   nodes up to ``retrieval_top_k_parents``.  Children that share a parent
    naturally collapse, so the top-ranked parent is whichever one contains the
-   highest-RRF child.
-6. **Context assembly**: gather matched child IDs and source URLs for the
+   highest-ranked child.
+7. **Context assembly**: gather matched child IDs and source URLs for the
    selected parents.
 
 The retrieved context is what the answer-generation stage actually sees.
@@ -40,6 +42,7 @@ from core.logging_config import get_logger
 from core.models import ParentNode, RetrievedContext
 from core.query_router import QueryRouteResult, RouteFilters, route_query
 from core.repository import DocumentRepository
+from core.reranker import ChildReranker
 from core.security import SanitizedQuery
 from core.vector_store import HybridSearchResult, QdrantVectorStore
 from ingestion.embeddings import HuggingFaceEmbedder
@@ -84,12 +87,14 @@ class HybridRetriever:
         vector_store: QdrantVectorStore,
         sparse_encoder: SparseEncoder,
         *,
+        reranker: ChildReranker | None = None,
         settings: Settings | None = None,
     ) -> None:
         self._repo = repository
         self._embedder = embedder
         self._vector_store = vector_store
         self._sparse_encoder = sparse_encoder
+        self._reranker = reranker
         self._settings = settings or get_settings()
 
     async def retrieve(
@@ -174,6 +179,15 @@ class HybridRetriever:
             query_preview=query[:120],
         )
 
+        if self._reranker is not None and self._settings.reranker_enabled:
+            rows = await _rerank_rows(
+                query=query,
+                rows=rows,
+                reranker=self._reranker,
+                repo=self._repo,
+                top_k=self._settings.reranker_top_k,
+            )
+
         top_k_parents = self._settings.retrieval_top_k_parents
         unique_parent_ids: list[UUID] = list(
             dict.fromkeys(UUID(str(r["parent_id"])) for r in rows)
@@ -221,6 +235,25 @@ class HybridRetriever:
             matched_child_ids=tuple(matched_child_ids),
             source_urls=tuple(source_urls),
         )
+
+
+async def _rerank_rows(
+    *,
+    query: str,
+    rows: list[dict[str, object]],
+    reranker: ChildReranker,
+    repo: DocumentRepository,
+    top_k: int,
+) -> list[dict[str, object]]:
+    """Re-order rows by cross-encoder score and trim to top_k."""
+    child_ids = [UUID(str(r["child_id"])) for r in rows]
+    child_texts = await repo.fetch_children_text(child_ids)
+    passages = [child_texts.get(UUID(str(r["child_id"])), "") for r in rows]
+    scores = await reranker.rerank(query, passages)
+    reranked = sorted(zip(scores, rows, strict=False), key=lambda x: x[0], reverse=True)
+    result = [row for _, row in reranked][:top_k]
+    logger.info("reranker_applied", n_in=len(rows), n_out=len(result))
+    return result
 
 
 async def _encode_query(

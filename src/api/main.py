@@ -26,8 +26,9 @@ from core.errors import (
 )
 from core.generation import AnswerGenerator
 from core.logging_config import configure_logging, get_logger
-from core.models import GenerationResult, ParentNode, RetrievedContext
+from core.models import GenerationResult, RetrievedContext
 from core.repository import DocumentRepository
+from core.reranker import ChildReranker
 from core.retrieval import HybridRetriever
 from core.security import InputGuard, OutputGuard
 from core.vector_store import QdrantVectorStore
@@ -44,6 +45,7 @@ class _AppState:
     vector_store: QdrantVectorStore
     sparse_encoder: SparseEncoder
     repository: DocumentRepository
+    reranker: ChildReranker | None
     retriever: HybridRetriever
     generator: AnswerGenerator
 
@@ -63,11 +65,20 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     await state.vector_store.ensure_collection()
     state.sparse_encoder = SparseEncoder(settings)
     state.repository = DocumentRepository(state.database)
+    state.reranker = (
+        ChildReranker(
+            settings.reranker_model_path,
+            hf_token=settings.huggingface_api_token.get_secret_value(),
+        )
+        if settings.reranker_enabled
+        else None
+    )
     state.retriever = HybridRetriever(
         state.repository,
         state.embedder,
         state.vector_store,
         state.sparse_encoder,
+        reranker=state.reranker,
         settings=settings,
     )
     state.generator = AnswerGenerator(
@@ -157,11 +168,19 @@ async def ask(
 
 def _to_response(result: GenerationResult, context: RetrievedContext) -> AskResponse:
     used_ids = set(result.used_parent_ids)
-    parents = [
-        _parent_to_response(parent)
-        for parent in context.parent_nodes
-        if parent.id in used_ids
-    ]
+    parents: list[CitedParent] = []
+    for index, parent in enumerate(context.parent_nodes, start=1):
+        if parent.id not in used_ids:
+            continue
+        metadata = dict(parent.metadata)
+        metadata["doc_index"] = index
+        parents.append(
+            CitedParent(
+                parent_id=str(parent.id),
+                text_content=parent.text_content,
+                metadata=metadata,
+            )
+        )
 
     return AskResponse(
         answer=result.answer,
@@ -169,12 +188,4 @@ def _to_response(result: GenerationResult, context: RetrievedContext) -> AskResp
         used_parent_ids=[str(pid) for pid in result.used_parent_ids],
         parents=parents,
         matched_child_ids=[str(cid) for cid in context.matched_child_ids],
-    )
-
-
-def _parent_to_response(parent: ParentNode) -> CitedParent:
-    return CitedParent(
-        parent_id=str(parent.id),
-        text_content=parent.text_content,
-        metadata=dict(parent.metadata),
     )

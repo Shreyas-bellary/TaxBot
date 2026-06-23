@@ -1,9 +1,8 @@
 import { AlertTriangle, Landmark } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
+import { getCitedSources } from "../lib/citations";
 import type { CitedParent, Message } from "../lib/types";
-import { SourcesPanel } from "./SourcesPanel";
+import { CitationMarkdown } from "./CitationMarkdown";
 
 interface MessageBubbleProps {
   message: Message;
@@ -23,6 +22,7 @@ export function MessageBubble({ message, onOpenSource }: MessageBubbleProps) {
 
   const isError = message.status === "error";
   const sources = message.sources ?? [];
+  const citedSources = getCitedSources(message.content, sources);
 
   return (
     <div className="flex gap-3">
@@ -41,16 +41,14 @@ export function MessageBubble({ message, onOpenSource }: MessageBubbleProps) {
           </p>
         ) : (
           <div className="markdown text-[15px]">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {message.content}
-            </ReactMarkdown>
+            <CitationMarkdown
+              content={message.content}
+              sources={sources}
+              onOpenSource={(anchorId) =>
+                onOpenSource(citedSources, anchorId)
+              }
+            />
           </div>
-        )}
-        {sources.length > 0 && (
-          <SourcesPanel
-            sources={sources}
-            onOpenSource={(anchorId) => onOpenSource(sources, anchorId)}
-          />
         )}
       </div>
     </div>

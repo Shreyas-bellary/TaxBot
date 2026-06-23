@@ -33,6 +33,7 @@ from core.generation import AnswerGenerator
 from core.logging_config import configure_logging, get_logger
 from core.models import GenerationResult, RetrievedContext
 from core.repository import DocumentRepository
+from core.reranker import ChildReranker
 from core.retrieval import HybridRetriever
 from core.security import OutputGuard
 from core.vector_store import QdrantVectorStore
@@ -194,6 +195,15 @@ def _prompt_to_text(prompt: PromptValue) -> str:
     return str(prompt)
 
 
+def _make_reranker(settings: Settings) -> ChildReranker | None:
+    if not settings.reranker_enabled:
+        return None
+    return ChildReranker(
+        settings.reranker_model_path,
+        hf_token=settings.huggingface_api_token.get_secret_value(),
+    )
+
+
 async def run_pipeline(
     cases: list[EvaluationCase],
     *,
@@ -216,6 +226,7 @@ async def run_pipeline(
             embedder,
             vector_store,
             sparse_encoder,
+            reranker=_make_reranker(settings),
             settings=settings,
         )
         generator = AnswerGenerator(
@@ -404,6 +415,7 @@ async def inspect_case(
             embedder,
             vector_store,
             sparse_encoder,
+            reranker=_make_reranker(settings),
             settings=settings,
         )
         generator = AnswerGenerator(
