@@ -228,6 +228,49 @@ class Settings(BaseSettings):
         description="Comma-separated browser origins allowed to call the API.",
     )
 
+    # --- Rate limiting (in-memory, per-IP) ---
+    rate_limit_enabled: bool = Field(
+        default=True,
+        description="Enable the in-memory per-IP daily answer quota on /v1/ask.",
+    )
+    rate_limit_answers_per_day: int = Field(
+        default=3,
+        ge=1,
+        le=10_000,
+        description="Number of successful answers allowed per client IP per UTC day.",
+    )
+    rate_limit_trust_forwarded_for: bool = Field(
+        default=False,
+        description=(
+            "Trust the first hop of the X-Forwarded-For header for the client IP. "
+            "Enable ONLY when the API runs behind a trusted reverse proxy/load balancer."
+        ),
+    )
+
+    # --- Conversation History ---
+    conversation_history_max_turns: int = Field(
+        default=8,
+        ge=0,
+        le=50,
+        description=(
+            "Maximum number of prior chat messages (user+assistant) accepted from the "
+            "client and used as transient context. History is never persisted server-side."
+        ),
+    )
+    conversation_history_max_chars: int = Field(
+        default=800,
+        ge=100,
+        le=8_000,
+        description="Per-message character cap applied to client-supplied history turns.",
+    )
+    conversation_condense_enabled: bool = Field(
+        default=True,
+        description=(
+            "Rewrite follow-up questions into standalone queries (using prior turns) "
+            "before retrieval, improving recall on context-dependent follow-ups."
+        ),
+    )
+
     user_query_start_tag: str = Field(
         default="USER_QUERY_START_5f3c1e",
         min_length=8,

@@ -40,6 +40,7 @@ NOT_FOUND_ANSWER: Final[str] = (
 )
 MAX_QUERY_LENGTH: Final[int] = 2_000
 MIN_QUERY_LENGTH: Final[int] = 10
+MAX_HISTORY_TURN_LENGTH: Final[int] = 2_000
 
 # Curated prompt-injection signatures. The regexes are deliberately
 # case-insensitive and word-boundary aware so polite variants ("Please
@@ -127,6 +128,33 @@ class InputGuard:
             start_tag=start,
             end_tag=end,
         )
+
+    def sanitize_history_turn(self, raw_text: str) -> str:
+        """Light sanitization for prior chat turns (no min-length requirement)."""
+
+        if not isinstance(raw_text, str):
+            raise InjectionDetectedError("History turn must be a string")
+
+        without_controls = _CONTROL_CHAR_RE.sub("", raw_text)
+        flattened = _WHITESPACE_RE.sub(" ", without_controls).strip()
+        if not flattened:
+            raise InjectionDetectedError("History turn is empty")
+        if len(flattened) > MAX_HISTORY_TURN_LENGTH:
+            flattened = flattened[: MAX_HISTORY_TURN_LENGTH - 1].rstrip() + "…"
+
+        start = self._settings.user_query_start_tag
+        end = self._settings.user_query_end_tag
+        if start in flattened or end in flattened:
+            raise InjectionDetectedError(
+                "History turn attempts to forge the user-query fence tags"
+            )
+
+        for pattern in _INJECTION_PATTERNS:
+            if pattern.search(flattened):
+                raise InjectionDetectedError(
+                    "History turn matches a known prompt-injection signature"
+                )
+        return flattened
 
 
 class OutputGuard:

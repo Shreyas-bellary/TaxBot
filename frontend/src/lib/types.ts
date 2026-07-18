@@ -5,6 +5,18 @@ export interface CitedParent {
   metadata: Record<string, unknown>;
 }
 
+/** Ephemeral prior turn sent with ask (never stored on the server). */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface RateLimitInfo {
+  limit: number;
+  remaining: number;
+  reset_at: string;
+}
+
 /** Mirrors the FastAPI `AskResponse` response model. */
 export interface AskResponse {
   answer: string;
@@ -12,6 +24,7 @@ export interface AskResponse {
   used_parent_ids: string[];
   parents: CitedParent[];
   matched_child_ids: string[];
+  rate_limit?: RateLimitInfo | null;
 }
 
 export type MessageRole = "user" | "assistant";
@@ -53,4 +66,14 @@ export function metaNumber(
 ): number | null {
   const value = metadata[key];
   return typeof value === "number" ? value : null;
+}
+
+/** Build API history from prior complete messages (excludes the current user turn). */
+export function toChatHistory(messages: Message[]): ChatTurn[] {
+  return messages
+    .filter((message) => message.status === "complete")
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
 }

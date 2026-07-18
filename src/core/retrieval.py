@@ -4,9 +4,10 @@ Pipeline order:
 
 1. **Query router**: :func:`~core.query_router.route_query` makes a single cheap
    LLM call that simultaneously enforces the domain gate (raises
-   :class:`~core.errors.OutOfDomainQueryError` for off-topic queries) and
+   :class:`~core.errors.OutOfDomainQueryError` for off-topic queries),
    returns structured Qdrant filter hints (``tax_year``, ``doc_type``,
-   ``form_numbers``).  Router failures fall back to unfiltered retrieval.
+   ``form_numbers``), and may rewrite vague follow-ups into a standalone
+   retrieval query.  Router failures fall back to unfiltered retrieval.
 2. **Hybrid stage**: Qdrant ``query_points`` with a dense (cosine) prefetch
    and a sparse (BM25) prefetch, fused via Reciprocal Rank Fusion (RRF).
 3. **Filter relaxation**: if the filtered search returns no hits, retry once
@@ -37,6 +38,7 @@ from pydantic import HttpUrl
 from qdrant_client.models import SparseVector
 
 from core.config import Settings, get_settings
+from core.conversation import ChatTurn
 from core.errors import OUT_OF_DOMAIN_MESSAGE, OutOfDomainQueryError, RetrievalError, RouterError
 from core.logging_config import get_logger
 from core.models import ParentNode, RetrievedContext
@@ -102,6 +104,7 @@ class HybridRetriever:
         query: str,
         *,
         sanitized: SanitizedQuery | None = None,
+        history: tuple[ChatTurn, ...] = (),
     ) -> RetrievedContext:
         """Run the full hybrid retrieval pipeline for a single query."""
 
@@ -124,7 +127,7 @@ class HybridRetriever:
 
         route: QueryRouteResult | None = None
         try:
-            route = await route_query(san, settings=self._settings)
+            route = await route_query(san, history=history, settings=self._settings)
         except OutOfDomainQueryError:
             raise
         except RouterError as exc:
@@ -136,9 +139,20 @@ class HybridRetriever:
             route = None
 
         filters: RouteFilters = route.filters if route else RouteFilters()
+        search_query = (
+            route.retrieval_query
+            if route is not None and route.retrieval_query
+            else query
+        )
+        if search_query != query:
+            logger.info(
+                "retrieval_query_rewritten",
+                original=query[:120],
+                rewritten=search_query[:120],
+            )
 
         dense_embedding, sparse_vector = await _encode_query(
-            query, self._embedder, self._sparse_encoder
+            search_query, self._embedder, self._sparse_encoder
         )
 
         has_filters = bool(
@@ -176,12 +190,12 @@ class HybridRetriever:
         assess_retrieval_confidence(
             rows,
             settings=self._settings,
-            query_preview=query[:120],
+            query_preview=search_query[:120],
         )
 
         if self._reranker is not None and self._settings.reranker_enabled:
             rows = await _rerank_rows(
-                query=query,
+                query=search_query,
                 rows=rows,
                 reranker=self._reranker,
                 repo=self._repo,
@@ -230,7 +244,7 @@ class HybridRetriever:
                 source_urls.append(HttpUrl(url))
 
         return RetrievedContext(
-            query=query,
+            query=search_query,
             parent_nodes=tuple(selected_parents.values()),
             matched_child_ids=tuple(matched_child_ids),
             source_urls=tuple(source_urls),

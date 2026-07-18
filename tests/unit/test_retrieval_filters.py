@@ -258,6 +258,136 @@ async def test_route_query_router_error_propagates() -> None:
             await route_query(san, settings=settings)
 
 
+@pytest.mark.asyncio
+async def test_route_query_includes_history_in_user_message() -> None:
+    from core.conversation import ChatTurn
+    from core.query_router import route_query
+    from core.security import SanitizedQuery
+
+    san = SanitizedQuery(
+        cleaned_text="what about for 2025?",
+        fenced_prompt_section="[START]\nwhat about for 2025?\n[END]",
+        start_tag="START",
+        end_tag="END",
+    )
+    history = (
+        ChatTurn(
+            role="user",
+            content="What is the standard deduction for tax year 2024?",
+        ),
+        ChatTurn(
+            role="assistant",
+            content="The standard deduction for tax year 2024 is $29,200.",
+        ),
+    )
+    raw_response = json.dumps(
+        {
+            "in_domain": True,
+            "filters": {"tax_year": 2025, "doc_type": None, "form_numbers": None},
+            "retrieval_query": "What is the standard deduction for tax year 2025?",
+        }
+    )
+    call_mock = AsyncMock(return_value=raw_response)
+
+    with patch("core.query_router._call_gemini", new=call_mock):
+        from core.config import Settings
+
+        settings = Settings(
+            postgres_dsn="postgresql://u:p@localhost/db",
+            unstructured_api_key="x",
+            huggingface_api_token="x",
+            gemini_api_key="x",
+            qdrant_url="https://qdrant.example.com:6333",
+            qdrant_api_key="x",
+            router_llm_provider="gemini",
+            router_llm_model="gemini-2.0-flash",
+        )
+        result = await route_query(san, history=history, settings=settings)
+
+    assert result.filters.tax_year == 2025
+    assert result.filters.form_numbers is None
+    assert result.retrieval_query == (
+        "What is the standard deduction for tax year 2025?"
+    )
+    user_message = call_mock.await_args.kwargs["user_message"]
+    assert "standard deduction" in user_message.lower()
+    assert "what about for 2025?" in user_message
+
+
+@pytest.mark.asyncio
+async def test_retrieve_uses_router_retrieval_query() -> None:
+    """Vague follow-ups are embedded using the router's rewritten query."""
+    import uuid
+
+    from core.retrieval import HybridRetriever
+
+    _CHILD_UUID = "00000000-0000-0000-0000-000000000002"
+    _PARENT_UUID = "00000000-0000-0000-0000-000000000001"
+
+    mock_hit = MagicMock()
+    mock_hit.child_id = _CHILD_UUID
+    mock_hit.parent_id = _PARENT_UUID
+    mock_hit.doc_id = "00000000-0000-0000-0000-000000000003"
+    mock_hit.rrf_score = 0.9
+    mock_hit.dense_top_score = 0.85
+
+    mock_vs = AsyncMock()
+    mock_vs.hybrid_search.return_value = [mock_hit]
+
+    mock_repo = AsyncMock()
+    mock_repo.fetch_parents.return_value = {
+        uuid.UUID(_PARENT_UUID): {
+            "doc_id": "00000000-0000-0000-0000-000000000003",
+            "text_content": "2025 standard deduction...",
+            "metadata": {"source_url": "https://irs.gov/pub/irs-pdf/p17.pdf"},
+        }
+    }
+
+    mock_embedder = AsyncMock()
+    mock_embedder.embed.return_value = tuple([0.1] * 1024)
+    mock_sparse = AsyncMock()
+    from qdrant_client.models import SparseVector
+    mock_sparse.embed_query.return_value = SparseVector(indices=[1], values=[1.0])
+
+    from core.config import Settings
+    from core.query_router import QueryRouteResult
+
+    settings = Settings(
+        postgres_dsn="postgresql://u:p@localhost/db",
+        unstructured_api_key="x",
+        huggingface_api_token="x",
+        gemini_api_key="x",
+        qdrant_url="https://qdrant.example.com:6333",
+        qdrant_api_key="x",
+        retrieval_confidence_gate_enabled=False,
+        router_llm_provider="gemini",
+        router_llm_model="gemini-2.0-flash",
+    )
+
+    rewritten = "What is the standard deduction for tax year 2025?"
+    route_result = QueryRouteResult(
+        filters=RouteFilters(tax_year=2025, form_numbers=None),
+        retrieval_query=rewritten,
+    )
+
+    with patch("core.retrieval.route_query", new=AsyncMock(return_value=route_result)):
+        retriever = HybridRetriever(
+            repository=mock_repo,
+            embedder=mock_embedder,
+            vector_store=mock_vs,
+            sparse_encoder=mock_sparse,
+            settings=settings,
+        )
+        ctx = await retriever.retrieve("what about 2025?")
+
+    mock_embedder.embed.assert_awaited_once_with(rewritten)
+    mock_sparse.embed_query.assert_awaited_once_with(rewritten)
+    assert ctx.query == rewritten
+    call_kwargs = mock_vs.hybrid_search.call_args_list[0].kwargs
+    assert call_kwargs.get("tax_year") == 2025
+    assert call_kwargs.get("form_numbers") is None
+
+
 # ---------------------------------------------------------------------------
 # HybridRetriever.retrieve — mocked router + vector store
 # ---------------------------------------------------------------------------

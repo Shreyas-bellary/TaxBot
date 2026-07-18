@@ -16,6 +16,7 @@ export const SAMPLE_QUESTIONS = [
 
 interface InputBarProps {
   pending: boolean;
+  disabled?: boolean;
   showSuggestions?: boolean;
   docked?: boolean;
   onSend: (query: string) => void;
@@ -25,6 +26,7 @@ interface InputBarProps {
 
 export function InputBar({
   pending,
+  disabled = false,
   showSuggestions = false,
   docked = true,
   onSend,
@@ -35,7 +37,11 @@ export function InputBar({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const trimmed = value.trim();
-  const canSend = trimmed.length >= 3 && trimmed.length <= MAX_QUERY_LENGTH && !pending;
+  const canSend =
+    !disabled &&
+    trimmed.length >= 3 &&
+    trimmed.length <= MAX_QUERY_LENGTH &&
+    !pending;
   const nearLimit = value.length >= MAX_QUERY_LENGTH - 200;
 
   useEffect(() => {
@@ -47,8 +53,8 @@ export function InputBar({
   }, [value]);
 
   useEffect(() => {
-    if (autoFocus && !pending) textareaRef.current?.focus();
-  }, [autoFocus, pending]);
+    if (autoFocus && !pending && !disabled) textareaRef.current?.focus();
+  }, [autoFocus, pending, disabled]);
 
   const submit = () => {
     if (!canSend) return;
@@ -70,8 +76,13 @@ export function InputBar({
           value={value}
           rows={1}
           maxLength={MAX_QUERY_LENGTH + 100}
-          placeholder="Ask any U.S. tax question"
+          placeholder={
+            disabled
+              ? "Daily free limit reached"
+              : "Ask any U.S. tax question"
+          }
           aria-label="Ask a tax question"
+          disabled={disabled || pending}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -112,7 +123,7 @@ export function InputBar({
               <button
                 key={question}
                 type="button"
-                disabled={pending || !showSuggestions}
+                disabled={pending || disabled || !showSuggestions}
                 onClick={() => onAskSample?.(question)}
                 style={{ animationDelay: `${index * 50}ms` }}
                 className="suggestion-link m-0 w-fit max-w-full border-0 bg-transparent py-1.5 text-left text-[13.5px] leading-snug text-ink-faint transition-colors duration-200 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
