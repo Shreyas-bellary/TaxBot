@@ -8,6 +8,7 @@ free-answer quota for the caller IP.
 
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -93,6 +94,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     state.rate_limiter = IpDailyRateLimiter(
         limit=settings.rate_limit_answers_per_day,
+        database=state.database,
     )
     logger.info(
         "api_ready",
@@ -160,16 +162,31 @@ def _get_generator() -> AnswerGenerator:
     return state.generator
 
 
-def _client_ip(request: Request) -> str:
-    """Best-effort client IP (honours first X-Forwarded-For hop when present)."""
+def _parse_ip(raw: str) -> str | None:
+    """Return the normalised IP string if ``raw`` is a valid IPv4/IPv6 address, else None."""
+    try:
+        return str(ipaddress.ip_address(raw.strip()))
+    except ValueError:
+        return None
 
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
+
+def _client_ip(request: Request) -> str:
+    """Extract a normalised client IP from the request.
+    With direct connections (no trusted proxy) we use ``request.client.host``
+    instead to avoid header-spoofing attacks.
+    """
+    if state.settings.rate_limit_trust_forwarded_for:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        for candidate in reversed(forwarded.split(",")):
+            ip = _parse_ip(candidate)
+            if ip is not None:
+                return ip
+
     if request.client and request.client.host:
-        return request.client.host
+        ip = _parse_ip(request.client.host)
+        if ip is not None:
+            return ip
+
     return "unknown"
 
 

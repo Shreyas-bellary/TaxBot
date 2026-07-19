@@ -71,7 +71,7 @@ function parseDetail(body: unknown): string {
   return "";
 }
 
-/** POST /v1/ask with optional ephemeral history. Throws `AskError` on failure. */
+
 export async function ask(
   query: string,
   history: ChatTurn[] = [],

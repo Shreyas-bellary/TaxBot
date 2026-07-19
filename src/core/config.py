@@ -228,10 +228,13 @@ class Settings(BaseSettings):
         description="Comma-separated browser origins allowed to call the API.",
     )
 
-    # --- Rate limiting (in-memory, per-IP) ---
+    # --- Rate limiting (Postgres-backed, per-IP) ---
     rate_limit_enabled: bool = Field(
         default=True,
-        description="Enable the in-memory per-IP daily answer quota on /v1/ask.",
+        description=(
+            "Enable the Postgres-backed per-IP daily answer quota on /v1/ask. "
+            "Quota is shared across all instances via private.ip_daily_rate_limits."
+        ),
     )
     rate_limit_answers_per_day: int = Field(
         default=3,
@@ -242,8 +245,10 @@ class Settings(BaseSettings):
     rate_limit_trust_forwarded_for: bool = Field(
         default=False,
         description=(
-            "Trust the first hop of the X-Forwarded-For header for the client IP. "
-            "Enable ONLY when the API runs behind a trusted reverse proxy/load balancer."
+            "Trust the X-Forwarded-For header for client IP extraction. "
+            "On Cloud Run (direct ingress) set to True: GFE appends the real "
+            "client IP as the LAST entry, which is the only trusted value. "
+            "Leave False when the API is directly reachable without a trusted proxy."
         ),
     )
 

@@ -253,6 +253,7 @@ async def _call_openrouter(
                 ],
                 "temperature": 0.0,
                 "max_tokens": 512,
+                "reasoning": {"effort": "none"},
                 "response_format": {"type": "json_object"},
             },
         )

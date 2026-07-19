@@ -57,6 +57,14 @@ jobs:
       - name: Mypy
         run: poetry run mypy src
 
+      - name: Apply migrations
+        env:
+          TAXBOT_POSTGRES_DSN: postgresql://taxbot:taxbot@localhost:5432/taxbot
+          TAXBOT_UNSTRUCTURED_API_KEY: ci-fake-unstructured-key
+          TAXBOT_HUGGINGFACE_API_TOKEN: ci-fake-hf-token
+          TAXBOT_GEMINI_API_KEY: ci-fake-gemini-key
+        run: poetry run taxbot-migrate
+
       - name: Pytest
         env:
           TAXBOT_POSTGRES_DSN: postgresql://taxbot:taxbot@localhost:5432/taxbot
