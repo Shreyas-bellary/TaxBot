@@ -26,7 +26,7 @@ variable "container_image" {
   description = "Initial placeholder image. CI/CD replaces it with Docker Hub builds."
   type        = string
   # Public Cloud Run sample image (not your Artifact Registry). Deploy swaps this.
-  default     = "us-docker.pkg.dev/cloudrun/container/hello"
+  default = "us-docker.pkg.dev/cloudrun/container/hello"
 }
 
 variable "revision" {
