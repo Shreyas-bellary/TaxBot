@@ -28,7 +28,7 @@ fastembed = ">=0.4"
 # HTTP and parsing
 httpx = "^0.28.0"
 beautifulsoup4 = "^4.12.3"
-lxml = "^5.3.0"
+lxml = "^6.1.0"
 pypdf = "^5.1.0"
 
 # Models / validation
@@ -53,8 +53,11 @@ torch = [
 transformers = ">=4.40"
 peft = ">=0.10"
 
+cryptography = ">=48.0.1"
+
 # API surface 
-fastapi = "^0.115.5"
+fastapi = "^0.135.0"
+starlette = "^1.3.1"
 uvicorn = { extras = ["standard"], version = "^0.32.1" }
 
 [tool.poetry.group.evaluation]
@@ -80,6 +83,7 @@ mypy = "^1.13.0"
 ruff = "^0.8.0"
 types-beautifulsoup4 = "^4.12.0.20240907"
 respx = "^0.21.1"
+httpx2 = "^2.7.0"
 
 [tool.poetry.scripts]
 taxbot-backfill = "ingestion.backfill:main"
