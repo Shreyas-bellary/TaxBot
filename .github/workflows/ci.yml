@@ -9,8 +9,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  lint-type-test:
+  backend:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -60,17 +64,91 @@ jobs:
       - name: Apply migrations
         env:
           TAXBOT_POSTGRES_DSN: postgresql://taxbot:taxbot@localhost:5432/taxbot
-          TAXBOT_UNSTRUCTURED_API_KEY: ci-fake-unstructured-key
-          TAXBOT_HUGGINGFACE_API_TOKEN: ci-fake-hf-token
-          TAXBOT_GEMINI_API_KEY: ci-fake-gemini-key
         run: poetry run taxbot-migrate
 
       - name: Pytest
         env:
           TAXBOT_POSTGRES_DSN: postgresql://taxbot:taxbot@localhost:5432/taxbot
-          TAXBOT_SUPABASE_URL: https://example.supabase.co
-          TAXBOT_SUPABASE_SERVICE_ROLE_KEY: ci-fake-service-role-key
           TAXBOT_UNSTRUCTURED_API_KEY: ci-fake-unstructured-key
           TAXBOT_HUGGINGFACE_API_TOKEN: ci-fake-hf-token
           TAXBOT_GEMINI_API_KEY: ci-fake-gemini-key
         run: poetry run pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Production build
+        env:
+          VITE_API_BASE_URL: ""
+        run: npm run build
+
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive infra
+
+      - name: Validate bootstrap
+        working-directory: infra/bootstrap
+        run: terraform init -backend=false && terraform validate
+
+      - name: Validate runtime
+        working-directory: infra/terraform
+        run: terraform init -backend=false && terraform validate
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [backend, frontend]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: taxbot:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan production image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: taxbot:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL

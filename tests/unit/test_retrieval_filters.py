@@ -30,7 +30,7 @@ from core.vector_store import _build_metadata_filter
 
 
 def test_filter_all_none_returns_none() -> None:
-    result = _build_metadata_filter(tax_year=None, doc_type=None, form_numbers=None)
+    result = _build_metadata_filter(tax_year=None, doc_type=None)
     assert result is None
 
 
@@ -43,33 +43,9 @@ def test_filter_tax_year_only() -> None:
     assert cond.match.value == 2024  # type: ignore[union-attr]
 
 
-def test_filter_single_form_number_uses_match_value() -> None:
-    result = _build_metadata_filter(
-        tax_year=None, doc_type=None, form_numbers=["Form 2555"]
-    )
-    assert result is not None
-    cond = result.must[0]  # type: ignore[index]
-    assert cond.key == "form_number"
-    assert isinstance(cond.match, models.MatchValue)
-    assert cond.match.value == "Form 2555"
-
-
-def test_filter_multiple_form_numbers_uses_match_any() -> None:
-    result = _build_metadata_filter(
-        tax_year=None,
-        doc_type=None,
-        form_numbers=["Form 2555", "Instruction 2555"],
-    )
-    assert result is not None
-    cond = result.must[0]  # type: ignore[index]
-    assert cond.key == "form_number"
-    assert isinstance(cond.match, models.MatchAny)
-    assert set(cond.match.any) == {"Form 2555", "Instruction 2555"}
-
-
 def test_filter_doc_type_only() -> None:
     result = _build_metadata_filter(
-        tax_year=None, doc_type="instruction", form_numbers=None
+        tax_year=None, doc_type="instruction"
     )
     assert result is not None
     cond = result.must[0]  # type: ignore[index]
@@ -82,16 +58,10 @@ def test_filter_all_fields_combined() -> None:
     result = _build_metadata_filter(
         tax_year=2023,
         doc_type="publication",
-        form_numbers=["Publication 17"],
     )
     assert result is not None
     keys = {c.key for c in result.must}  # type: ignore[union-attr]
-    assert keys == {"tax_year", "form_number", "doc_type"}
-
-
-def test_filter_empty_form_numbers_list_is_no_filter() -> None:
-    result = _build_metadata_filter(tax_year=None, doc_type=None, form_numbers=[])
-    assert result is None
+    assert keys == {"tax_year", "doc_type"}
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +76,6 @@ def test_parse_in_domain_with_filters() -> None:
             "filters": {
                 "tax_year": 2024,
                 "doc_type": "instruction",
-                "form_numbers": ["Form 1040", "Instruction 1040"],
             },
         }
     )
@@ -115,7 +84,6 @@ def test_parse_in_domain_with_filters() -> None:
     assert result.filters is not None
     assert result.filters.tax_year == 2024
     assert result.filters.doc_type == "instruction"
-    assert result.filters.form_numbers == ["Form 1040", "Instruction 1040"]
 
 
 def test_parse_in_domain_null_filters() -> None:
@@ -170,7 +138,6 @@ async def test_route_query_in_domain_returns_filters() -> None:
             "filters": {
                 "tax_year": None,
                 "doc_type": "instruction",
-                "form_numbers": ["Form 2555", "Instruction 2555"],
             },
         }
     )
@@ -191,8 +158,6 @@ async def test_route_query_in_domain_returns_filters() -> None:
         result = await route_query(san, settings=settings)
 
     assert result.filters.doc_type == "instruction"
-    assert "Form 2555" in (result.filters.form_numbers or [])
-    assert "Instruction 2555" in (result.filters.form_numbers or [])
 
 
 @pytest.mark.asyncio
@@ -283,7 +248,7 @@ async def test_route_query_includes_history_in_user_message() -> None:
     raw_response = json.dumps(
         {
             "in_domain": True,
-            "filters": {"tax_year": 2025, "doc_type": None, "form_numbers": None},
+            "filters": {"tax_year": 2025, "doc_type": None},
             "retrieval_query": "What is the standard deduction for tax year 2025?",
         }
     )
@@ -305,7 +270,6 @@ async def test_route_query_includes_history_in_user_message() -> None:
         result = await route_query(san, history=history, settings=settings)
 
     assert result.filters.tax_year == 2025
-    assert result.filters.form_numbers is None
     assert result.retrieval_query == (
         "What is the standard deduction for tax year 2025?"
     )
@@ -366,7 +330,7 @@ async def test_retrieve_uses_router_retrieval_query() -> None:
 
     rewritten = "What is the standard deduction for tax year 2025?"
     route_result = QueryRouteResult(
-        filters=RouteFilters(tax_year=2025, form_numbers=None),
+        filters=RouteFilters(tax_year=2025),
         retrieval_query=rewritten,
     )
 
@@ -385,7 +349,6 @@ async def test_retrieve_uses_router_retrieval_query() -> None:
     assert ctx.query == rewritten
     call_kwargs = mock_vs.hybrid_search.call_args_list[0].kwargs
     assert call_kwargs.get("tax_year") == 2025
-    assert call_kwargs.get("form_numbers") is None
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +410,6 @@ async def test_retrieve_applies_router_filters() -> None:
         filters=RouteFilters(
             tax_year=None,
             doc_type="instruction",
-            form_numbers=["Form 2555", "Instruction 2555"],
         )
     )
 
@@ -465,7 +427,7 @@ async def test_retrieve_applies_router_filters() -> None:
 
     call_kwargs = mock_vs.hybrid_search.call_args_list[0].kwargs
     assert call_kwargs.get("doc_type") == "instruction"
-    assert call_kwargs.get("form_numbers") == ["Form 2555", "Instruction 2555"]
+    assert "form_numbers" not in call_kwargs
     assert ctx is not None
 
 
@@ -521,7 +483,7 @@ async def test_retrieve_relaxes_filters_on_zero_hits() -> None:
     )
 
     route_result = QueryRouteResult(
-        filters=RouteFilters(tax_year=2024, doc_type=None, form_numbers=None)
+        filters=RouteFilters(tax_year=2024)
     )
 
     with patch("core.retrieval.route_query", new=AsyncMock(return_value=route_result)):
@@ -541,7 +503,7 @@ async def test_retrieve_relaxes_filters_on_zero_hits() -> None:
     second_call = mock_vs.hybrid_search.call_args_list[1].kwargs
     assert second_call.get("tax_year") is None
     assert second_call.get("doc_type") is None
-    assert second_call.get("form_numbers") is None
+    assert "form_numbers" not in second_call
     assert ctx is not None
 
 
@@ -612,5 +574,5 @@ async def test_retrieve_router_error_falls_back_to_unfiltered() -> None:
     call_kwargs = mock_vs.hybrid_search.call_args_list[0].kwargs
     assert call_kwargs.get("tax_year") is None
     assert call_kwargs.get("doc_type") is None
-    assert call_kwargs.get("form_numbers") is None
+    assert "form_numbers" not in call_kwargs
     assert ctx is not None

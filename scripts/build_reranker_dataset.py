@@ -283,9 +283,7 @@ class ChildHybridRetriever:
         )
 
         has_filters = bool(
-            filters.tax_year is not None
-            or filters.doc_type is not None
-            or filters.form_numbers
+            filters.tax_year is not None or filters.doc_type is not None
         )
 
         results = await self._vector_store.hybrid_search(
@@ -294,7 +292,6 @@ class ChildHybridRetriever:
             top_k=top_k,
             tax_year=filters.tax_year,
             doc_type=filters.doc_type,
-            form_numbers=filters.form_numbers,
         )
 
         if not results and has_filters:

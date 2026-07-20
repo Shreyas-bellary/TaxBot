@@ -1,7 +1,7 @@
-.PHONY: install lint type test test-cov backfill delta migrate evaluate api frontend-install frontend-dev frontend-build
+.PHONY: install lint type test test-cov backfill delta migrate evaluate api frontend-install frontend-dev frontend-build docker-build docker-run terraform-fmt terraform-validate
 
 install:
-	poetry install --with dev
+	poetry install --with dev,evaluation
 
 lint:
 	poetry run ruff check src tests
@@ -44,3 +44,20 @@ frontend-dev:
 
 frontend-build:
 	cd frontend && npm run build
+
+docker-build:
+	docker build --tag taxbot:local .
+
+docker-run:
+	docker run --rm --env-file .env \
+		-e TAXBOT_STATIC_DIR=/app/static \
+		--publish 8080:8080 taxbot:local
+
+terraform-fmt:
+	terraform fmt -recursive infra
+
+terraform-validate:
+	terraform -chdir=infra/bootstrap init -backend=false
+	terraform -chdir=infra/bootstrap validate
+	terraform -chdir=infra/terraform init -backend=false
+	terraform -chdir=infra/terraform validate

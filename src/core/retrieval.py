@@ -5,8 +5,8 @@ Pipeline order:
 1. **Query router**: :func:`~core.query_router.route_query` makes a single cheap
    LLM call that simultaneously enforces the domain gate (raises
    :class:`~core.errors.OutOfDomainQueryError` for off-topic queries),
-   returns structured Qdrant filter hints (``tax_year``, ``doc_type``,
-   ``form_numbers``), and may rewrite vague follow-ups into a standalone
+   returns structured Qdrant filter hints (``tax_year``, ``doc_type``), and may
+   rewrite vague follow-ups into a standalone
    retrieval query.  Router failures fall back to unfiltered retrieval.
 2. **Hybrid stage**: Qdrant ``query_points`` with a dense (cosine) prefetch
    and a sparse (BM25) prefetch, fused via Reciprocal Rank Fusion (RRF).
@@ -156,9 +156,7 @@ class HybridRetriever:
         )
 
         has_filters = bool(
-            filters.tax_year is not None
-            or filters.doc_type is not None
-            or filters.form_numbers
+            filters.tax_year is not None or filters.doc_type is not None
         )
 
         results = await self._vector_store.hybrid_search(
@@ -167,7 +165,6 @@ class HybridRetriever:
             top_k=top_k,
             tax_year=filters.tax_year,
             doc_type=filters.doc_type,
-            form_numbers=filters.form_numbers,
         )
 
         if not results and has_filters:
@@ -175,7 +172,6 @@ class HybridRetriever:
                 "retrieval_filter_relaxation",
                 tax_year=filters.tax_year,
                 doc_type=filters.doc_type,
-                form_numbers=filters.form_numbers,
             )
             results = await self._vector_store.hybrid_search(
                 dense_vector=dense_embedding,

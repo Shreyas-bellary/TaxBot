@@ -53,7 +53,6 @@ def _build_metadata_filter(
     *,
     tax_year: int | None,
     doc_type: str | None,
-    form_numbers: list[str] | None = None,
 ) -> models.Filter | None:
     """Convert LLM router filter hints into a Qdrant :class:`~qdrant_client.models.Filter`.
 
@@ -68,21 +67,6 @@ def _build_metadata_filter(
                 match=models.MatchValue(value=tax_year),
             )
         )
-    if form_numbers:
-        if len(form_numbers) == 1:
-            conditions.append(
-                models.FieldCondition(
-                    key="form_number",
-                    match=models.MatchValue(value=form_numbers[0]),
-                )
-            )
-        else:
-            conditions.append(
-                models.FieldCondition(
-                    key="form_number",
-                    match=models.MatchAny(any=form_numbers),
-                )
-            )
     if doc_type is not None:
         conditions.append(
             models.FieldCondition(
@@ -322,7 +306,6 @@ class QdrantVectorStore:
         top_k: int,
         tax_year: int | None = None,
         doc_type: str | None = None,
-        form_numbers: list[str] | None = None,
     ) -> list[HybridSearchResult]:
         """Run Qdrant hybrid search (dense cosine + BM25 sparse, RRF fusion).
 
@@ -334,7 +317,6 @@ class QdrantVectorStore:
         query_filter = _build_metadata_filter(
             tax_year=tax_year,
             doc_type=doc_type,
-            form_numbers=form_numbers,
         )
         filtered = query_filter is not None
 

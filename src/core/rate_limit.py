@@ -58,9 +58,7 @@ class IpDailyRateLimiter:
     def limit(self) -> int:
         return self._limit
 
-    # ------------------------------------------------------------------
-    # Public interface (mirrors the old in-memory API exactly)
-    # ------------------------------------------------------------------
+
 
     async def check(self, client_ip: str) -> RateLimitDecision:
         """Return the caller's current quota state without consuming a slot."""

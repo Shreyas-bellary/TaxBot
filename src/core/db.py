@@ -15,20 +15,43 @@ logger = get_logger(__name__)
 class Database:
     """Async Postgres facade backed by an ``asyncpg`` pool."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
-        self._settings = settings or get_settings()
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        dsn: str | None = None,
+        command_timeout: float | None = None,
+    ) -> None:
+        if settings is not None and dsn is not None:
+            raise ValueError("Pass either settings or dsn, not both")
+
+        if dsn is None:
+            resolved = settings or get_settings()
+            self._dsn = str(resolved.postgres_dsn)
+            self._command_timeout = command_timeout or resolved.irs_request_timeout_seconds
+            self._statement_cache_size = resolved.postgres_statement_cache_size
+        else:
+            self._dsn = dsn
+            self._command_timeout = command_timeout or 30.0
+            self._statement_cache_size = 0
         self._pool: asyncpg.Pool | None = None
 
     async def connect(self, *, min_size: int = 1, max_size: int = 10) -> None:
         if self._pool is not None:
             return
         self._pool = await asyncpg.create_pool(
-            dsn=str(self._settings.postgres_dsn),
+            dsn=self._dsn,
             min_size=min_size,
             max_size=max_size,
-            command_timeout=self._settings.irs_request_timeout_seconds,
+            command_timeout=self._command_timeout,
+            statement_cache_size=self._statement_cache_size,
         )
-        logger.info("postgres_pool_ready", min_size=min_size, max_size=max_size)
+        logger.info(
+            "postgres_pool_ready",
+            min_size=min_size,
+            max_size=max_size,
+            statement_cache_size=self._statement_cache_size,
+        )
 
     async def close(self) -> None:
         if self._pool is None:

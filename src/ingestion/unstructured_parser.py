@@ -73,8 +73,13 @@ class UnstructuredParser:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
+        api_key = self._settings.unstructured_api_key
+        if api_key is None:
+            raise ValueError(
+                "TAXBOT_UNSTRUCTURED_API_KEY is required for ingestion workloads"
+            )
         self._client = UnstructuredClient(
-            api_key_auth=self._settings.unstructured_api_key.get_secret_value(),
+            api_key_auth=api_key.get_secret_value(),
             server_url=str(self._settings.unstructured_api_url),
         )
 

@@ -28,12 +28,12 @@ from core.vector_store import HybridSearchResult
 # ---------------------------------------------------------------------------
 
 _DEFAULT_ROUTE = QueryRouteResult(
-    filters=RouteFilters(tax_year=None, doc_type=None, form_numbers=None)
+    filters=RouteFilters(tax_year=None, doc_type=None)
 )
 
 # A route with a year filter so relaxation tests can trigger the retry path
 _FILTERED_ROUTE = QueryRouteResult(
-    filters=RouteFilters(tax_year=2024, doc_type=None, form_numbers=None)
+    filters=RouteFilters(tax_year=2024, doc_type=None)
 )
 
 

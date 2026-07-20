@@ -12,7 +12,7 @@ from core.vector_store import _PAYLOAD_INDEXES, _build_metadata_filter, _is_qdra
 
 
 def test_filter_all_none_returns_none() -> None:
-    result = _build_metadata_filter(tax_year=None, doc_type=None, form_numbers=None)
+    result = _build_metadata_filter(tax_year=None, doc_type=None)
     assert result is None
 
 
@@ -26,22 +26,11 @@ def test_filter_tax_year_only() -> None:
 
 
 def test_filter_multiple_conditions() -> None:
-    result = _build_metadata_filter(
-        tax_year=2023, form_numbers=["Form 1040"], doc_type="form"
-    )
+    result = _build_metadata_filter(tax_year=2023, doc_type="form")
     assert result is not None
-    assert len(result.must) == 3  # type: ignore[arg-type]
+    assert len(result.must) == 2  # type: ignore[arg-type]
     keys = {c.key for c in result.must}  # type: ignore[union-attr]
-    assert keys == {"tax_year", "form_number", "doc_type"}
-
-
-def test_filter_form_number_only() -> None:
-    result = _build_metadata_filter(
-        tax_year=None, form_numbers=["Publication 535"], doc_type=None
-    )
-    assert result is not None
-    assert len(result.must) == 1  # type: ignore[arg-type]
-    assert result.must[0].key == "form_number"  # type: ignore[index]
+    assert keys == {"tax_year", "doc_type"}
 
 
 def test_payload_indexes_cover_filter_and_delete_fields() -> None:

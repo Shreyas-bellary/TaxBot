@@ -8,6 +8,7 @@ workers and the retrieval layer cannot mutate global state at runtime.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import AnyHttpUrl, Field, PostgresDsn, SecretStr, field_validator
@@ -37,8 +38,19 @@ class Settings(BaseSettings):
         ...,
         description="Async Postgres DSN used by asyncpg for parent/child writes.",
     )
+    postgres_statement_cache_size: int = Field(
+        default=100,
+        ge=0,
+        description=(
+            "asyncpg prepared-statement cache size. Use 0 with Supabase/PgBouncer "
+            "pooler URLs (port 6543); direct connections (5432) may use the default 100."
+        ),
+    )
 
-    unstructured_api_key: SecretStr = Field(..., description="Hosted Unstructured API key.")
+    unstructured_api_key: SecretStr | None = Field(
+        default=None,
+        description="Hosted Unstructured API key. Required only by ingestion workloads.",
+    )
     unstructured_api_url: AnyHttpUrl = Field(
         default=AnyHttpUrl("https://api.unstructuredapp.io"),
         description="Hosted Unstructured API base URL.",
@@ -226,6 +238,10 @@ class Settings(BaseSettings):
     cors_allow_origins: str = Field(
         default="http://localhost:5173",
         description="Comma-separated browser origins allowed to call the API.",
+    )
+    static_dir: Path | None = Field(
+        default=None,
+        description="Directory containing the built frontend. None disables static serving.",
     )
 
     # --- Rate limiting (Postgres-backed, per-IP) ---

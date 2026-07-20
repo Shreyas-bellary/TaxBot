@@ -48,3 +48,11 @@ artifacts/
 node_modules/
 .next/
 out/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+infra/terraform/terraform.tfvars

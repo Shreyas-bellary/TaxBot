@@ -7,7 +7,7 @@ const MAX_ROWS = 10;
 const LINE_HEIGHT_PX = 24;
 const SHELL_PADDING_X = "px-4";
 
-export const SAMPLE_QUESTIONS = [
+const SAMPLE_QUESTIONS = [
   "What is the standard deduction for tax year 2024?",
   "How do I file Form 1040 if I'm self-employed?",
   "Who qualifies for the Earned Income Tax Credit?",

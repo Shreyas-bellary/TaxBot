@@ -38,12 +38,6 @@ pydantic-settings = "^2.6.1"
 # Generation
 google-genai = "^1.4.0"
 
-# Evaluation
-ragas = "^0.2.6"
-datasets = "^3.1.0"
-langchain-google-genai = "^2.0.6"
-langchain-community = "<0.4.2"
-
 # Operational hygiene
 tenacity = "^9.0.0"
 structlog = "^24.4.0"
@@ -52,14 +46,31 @@ tqdm = "^4.67.0"
 orjson = "^3.10.11"
 
 # Reranker
-torch = ">=2.0"
+torch = [
+    { version = ">=2.0", source = "pytorch-cpu", markers = "sys_platform == 'linux'" },
+    { version = ">=2.0", markers = "sys_platform != 'linux'" },
+]
 transformers = ">=4.40"
 peft = ">=0.10"
 
 # API surface 
 fastapi = "^0.115.5"
 uvicorn = { extras = ["standard"], version = "^0.32.1" }
+
+[tool.poetry.group.evaluation]
+optional = true
+
+[tool.poetry.group.evaluation.dependencies]
+ragas = "^0.2.6"
+datasets = "^3.1.0"
+langchain-google-genai = "^2.0.6"
+langchain-community = "<0.4.2"
 langchain-huggingface = "^1.2.2"
+
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"
@@ -122,6 +133,9 @@ module = [
     "asyncpg",
     "ragas.*",
     "datasets.*",
+    "langchain_community.*",
+    "langchain_core.*",
+    "langchain_huggingface.*",
     "unstructured_client.*",
     "fastembed.*",
 ]

@@ -17,6 +17,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from api.static import mount_frontend
 from core.config import Settings, get_settings
 from core.conversation import MAX_HISTORY_TURNS, ChatTurn
 from core.db import Database
@@ -208,7 +209,23 @@ def _rate_limit_payload(decision: RateLimitDecision) -> dict[str, int | str]:
 
 @app.get("/healthz", response_model=dict[str, str])
 async def healthz() -> dict[str, str]:
+    """Process liveness endpoint with no external dependency checks."""
     return {"status": "ok"}
+
+
+@app.get("/readyz", response_model=dict[str, str])
+async def readyz() -> dict[str, str]:
+    """Readiness endpoint that verifies the shared Postgres connection."""
+
+    try:
+        await state.database.fetchrow("SELECT 1")
+    except Exception as exc:
+        logger.warning("readiness_check_failed", error=repr(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service dependencies are not ready.",
+        ) from exc
+    return {"status": "ready"}
 
 
 @app.get("/v1/rate-limit", response_model=dict[str, int | str | bool])
@@ -323,3 +340,6 @@ def _to_response(
         matched_child_ids=[str(cid) for cid in context.matched_child_ids],
         rate_limit=_rate_limit_payload(rate_decision) if rate_decision else None,
     )
+
+
+mount_frontend(app, get_settings().static_dir)

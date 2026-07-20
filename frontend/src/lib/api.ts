@@ -1,8 +1,10 @@
 import type { AskResponse, ChatTurn, RateLimitInfo } from "./types";
 
+const configuredApiBase = (
+  import.meta.env.VITE_API_BASE_URL as string | undefined
+)?.replace(/\/+$/, "");
 const API_BASE: string =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
-  "http://localhost:8000";
+  configuredApiBase ?? (import.meta.env.PROD ? "" : "http://localhost:8000");
 
 export const MAX_QUERY_LENGTH = 2000;
 /** Max prior turns sent with each ask (must match backend MAX_HISTORY_TURNS). */

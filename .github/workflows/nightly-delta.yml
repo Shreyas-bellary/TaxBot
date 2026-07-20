@@ -42,19 +42,11 @@ jobs:
       - name: Apply migrations
         env:
           TAXBOT_POSTGRES_DSN: ${{ secrets.TAXBOT_POSTGRES_DSN }}
-          TAXBOT_SUPABASE_URL: ${{ secrets.TAXBOT_SUPABASE_URL }}
-          TAXBOT_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TAXBOT_SUPABASE_SERVICE_ROLE_KEY }}
-          TAXBOT_UNSTRUCTURED_API_KEY: ${{ secrets.TAXBOT_UNSTRUCTURED_API_KEY }}
-          TAXBOT_HUGGINGFACE_API_TOKEN: ${{ secrets.TAXBOT_HUGGINGFACE_API_TOKEN }}
-          TAXBOT_GEMINI_API_KEY: ${{ secrets.TAXBOT_GEMINI_API_KEY }}
-          TAXBOT_OPENROUTER_API_KEY: ${{ secrets.TAXBOT_OPENROUTER_API_KEY }}
         run: poetry run taxbot-migrate
 
       - name: Delta ingestion
         env:
           TAXBOT_POSTGRES_DSN: ${{ secrets.TAXBOT_POSTGRES_DSN }}
-          TAXBOT_SUPABASE_URL: ${{ secrets.TAXBOT_SUPABASE_URL }}
-          TAXBOT_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TAXBOT_SUPABASE_SERVICE_ROLE_KEY }}
           TAXBOT_UNSTRUCTURED_API_KEY: ${{ secrets.TAXBOT_UNSTRUCTURED_API_KEY }}
           TAXBOT_HUGGINGFACE_API_TOKEN: ${{ secrets.TAXBOT_HUGGINGFACE_API_TOKEN }}
           TAXBOT_GEMINI_API_KEY: ${{ secrets.TAXBOT_GEMINI_API_KEY }}

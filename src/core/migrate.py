@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from core.config import get_settings
+from pydantic import Field, PostgresDsn
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from core.db import Database
 from core.logging_config import configure_logging, get_logger
 
@@ -24,6 +26,24 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 """
+
+
+class MigrationSettings(BaseSettings):
+    """Minimal settings required by the standalone migration job."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="TAXBOT_",
+        extra="ignore",
+        frozen=True,
+        case_sensitive=False,
+    )
+
+    postgres_dsn: PostgresDsn
+    db_command_timeout_seconds: float = Field(default=30.0, gt=0.0)
+    log_level: str = "INFO"
+    log_json: bool = True
 
 
 def _migration_files() -> list[Path]:
@@ -64,9 +84,12 @@ async def apply_migrations(database: Database) -> list[str]:
 
 
 async def _run() -> None:
-    settings = get_settings()
+    settings = MigrationSettings()
     configure_logging(level=settings.log_level, as_json=settings.log_json)
-    async with Database(settings) as database:
+    async with Database(
+        dsn=str(settings.postgres_dsn),
+        command_timeout=settings.db_command_timeout_seconds,
+    ) as database:
         applied = await apply_migrations(database)
     logger.info("migrations_complete", count=len(applied), names=applied)
 

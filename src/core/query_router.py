@@ -8,9 +8,8 @@ and **before** vector retrieval. It performs three jobs in one round-trip:
    :class:`~core.errors.OutOfDomainQueryError` immediately;
 
 2. **Filter extraction** — returns a structured :class:`RouteFilters` object
-   (``tax_year``, ``doc_type``, ``form_numbers``) that the retrieval layer
-   passes to Qdrant as payload filter conditions. ``None`` / empty means no
-   filter (wide search).
+   (``tax_year``, ``doc_type``) that the retrieval layer passes to Qdrant as
+   payload filter conditions. ``None`` / empty means no filter (wide search).
 
 3. **Retrieval rewrite** — when conversation history makes the current turn a
    vague follow-up, returns a standalone ``retrieval_query`` suitable for
@@ -89,23 +88,13 @@ filters schema (all fields optional / nullable):
   tax_year: integer | null       — tax year from the current question or \
 resolved follow-up intent
   doc_type: "form" | "instruction" | "publication" | "notice" | null
-  form_numbers: list[string] | null  — ONLY when the user explicitly names an \
-IRS form, schedule, instruction, or publication (e.g. "Form 2555", "Pub 17", \
-"Schedule SE"). Do NOT invent or default forms for general topics such as \
-standard deduction, credits, or filing status when no product number was named.
-      Use the IRS product-number format (not title text):
-        blank forms   → "Form NNNN"  e.g. "Form 2555"
-        instructions  → "Instruction NNNN"  e.g. "Instruction 2555"
-        publications  → "Publication NN"  e.g. "Publication 17"
-      When a blank form is named, include BOTH that form and its instruction \
-product number. Leave null when none are named.
 
 Output ONLY the JSON object. No markdown fences, no prose.
 
 Example outputs:
-{"in_domain": true, "filters": {"tax_year": 2024, "doc_type": null, "form_numbers": null}, "retrieval_query": null}
-{"in_domain": true, "filters": {"tax_year": null, "doc_type": "instruction", "form_numbers": ["Instruction 2555", "Form 2555"]}, "retrieval_query": null}
-{"in_domain": true, "filters": {"tax_year": 2025, "doc_type": null, "form_numbers": null}, "retrieval_query": "What is the standard deduction for tax year 2025?"}
+{"in_domain": true, "filters": {"tax_year": 2024, "doc_type": null}, "retrieval_query": null}
+{"in_domain": true, "filters": {"tax_year": null, "doc_type": "instruction"}, "retrieval_query": null}
+{"in_domain": true, "filters": {"tax_year": 2025, "doc_type": null}, "retrieval_query": "What is the standard deduction for tax year 2025?"}
 {"in_domain": true, "filters": null, "retrieval_query": null}
 {"in_domain": false, "filters": null, "retrieval_query": null}
 """
@@ -122,7 +111,6 @@ class RouteFilters(BaseModel):
 
     tax_year: int | None = Field(default=None)
     doc_type: DocTypeValue | None = Field(default=None)
-    form_numbers: list[str] | None = Field(default=None)
 
 
 class RouterResponse(BaseModel):
@@ -341,7 +329,6 @@ async def route_query(
         in_domain=parsed.in_domain,
         tax_year=parsed.filters.tax_year if parsed.filters else None,
         doc_type=parsed.filters.doc_type if parsed.filters else None,
-        form_numbers=parsed.filters.form_numbers if parsed.filters else None,
         retrieval_query=parsed.retrieval_query,
         model=model_id,
         provider=provider,
