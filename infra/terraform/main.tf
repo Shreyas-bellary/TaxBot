@@ -16,6 +16,7 @@ locals {
     TAXBOT_HF_EMBED_CONCURRENCY              = "2"
     TAXBOT_LOG_JSON                          = "true"
     TAXBOT_LOG_LEVEL                         = "INFO"
+    TAXBOT_POSTGRES_STATEMENT_CACHE_SIZE     = "0"
     TAXBOT_QDRANT_COLLECTION                 = var.qdrant_collection
     TAXBOT_QDRANT_TIMEOUT_SECONDS            = "120"
     TAXBOT_QDRANT_URL                        = var.qdrant_url
