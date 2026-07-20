@@ -147,7 +147,7 @@ resource "google_cloud_run_v2_service" "taxbot" {
         failure_threshold     = 24
 
         http_get {
-          path = "/healthz"
+          path = "/readyz"
           port = 8080
         }
       }
@@ -159,7 +159,7 @@ resource "google_cloud_run_v2_service" "taxbot" {
         failure_threshold     = 3
 
         http_get {
-          path = "/healthz"
+          path = "/readyz"
           port = 8080
         }
       }

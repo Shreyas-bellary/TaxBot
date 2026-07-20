@@ -207,15 +207,9 @@ def _rate_limit_payload(decision: RateLimitDecision) -> dict[str, int | str]:
     }
 
 
-@app.get("/healthz", response_model=dict[str, str])
-async def healthz() -> dict[str, str]:
-    """Process liveness endpoint with no external dependency checks."""
-    return {"status": "ok"}
-
-
 @app.get("/readyz", response_model=dict[str, str])
 async def readyz() -> dict[str, str]:
-    """Readiness endpoint that verifies the shared Postgres connection."""
+    """Readiness and liveness endpoint that verifies the shared Postgres connection."""
 
     try:
         await state.database.fetchrow("SELECT 1")

@@ -33,7 +33,7 @@ non-root user, and listens on port 8080.
 ```bash
 make docker-build
 make docker-run
-curl http://localhost:8080/healthz
+curl http://localhost:8080/readyz
 ```
 
 The image never includes `.env`. Local Docker uses `--env-file .env`; Cloud Run
@@ -130,7 +130,7 @@ After CI succeeds on a `main` push, deployment:
 2. builds and pushes an immutable commit-SHA image to public Docker Hub;
 3. runs the Cloud Run migration job and stops on failure;
 4. deploys the same image to Cloud Run;
-5. smoke-tests `/healthz` and the frontend.
+5. smoke-tests `/readyz` and the frontend.
 
 Only one production deployment runs at a time, and newer pushes cancel stale
 deployments.

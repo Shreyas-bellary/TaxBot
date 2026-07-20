@@ -21,15 +21,15 @@ def test_static_frontend_serves_index_after_api_routes(tmp_path: Path) -> None:
     (tmp_path / "index.html").write_text("<h1>TaxBot</h1>", encoding="utf-8")
     app = FastAPI()
 
-    @app.get("/healthz")
-    async def healthz() -> dict[str, str]:
-        return {"status": "ok"}
+    @app.get("/readyz")
+    async def readyz() -> dict[str, str]:
+        return {"status": "ready"}
 
     assert mount_frontend(app, tmp_path) is True
 
     with TestClient(app) as client:
         assert client.get("/").text == "<h1>TaxBot</h1>"
-        assert client.get("/healthz").json() == {"status": "ok"}
+        assert client.get("/readyz").json() == {"status": "ready"}
 
 
 def test_static_frontend_requires_index(tmp_path: Path) -> None:
