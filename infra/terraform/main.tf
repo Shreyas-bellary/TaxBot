@@ -146,7 +146,8 @@ resource "google_cloud_run_v2_service" "taxbot" {
         period_seconds        = 10
         failure_threshold     = 24
 
-        tcp_socket {
+        http_get {
+          path = "/healthz"
           port = 8080
         }
       }
@@ -154,7 +155,7 @@ resource "google_cloud_run_v2_service" "taxbot" {
       liveness_probe {
         initial_delay_seconds = 10
         timeout_seconds       = 5
-        period_seconds        = 30
+        period_seconds        = 60
         failure_threshold     = 3
 
         http_get {
