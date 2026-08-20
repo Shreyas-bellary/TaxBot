@@ -61,7 +61,6 @@ ENV PATH=/app/.venv/bin:${PATH} \
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --upgrade "setuptools>=78.1.1" \
     && groupadd --system --gid 10001 taxbot \
     && useradd --system --uid 10001 --gid taxbot --home-dir /app --shell /usr/sbin/nologin taxbot
 

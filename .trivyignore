@@ -1,0 +1,7 @@
+# msgpack bundled inside torch wheel — the app's own venv has 1.2.1 (see pyproject.toml),
+# but torch vendors an older copy that cannot be upgraded independently.
+GHSA-6v7p-g79w-8964
+
+# setuptools in the base image's system site-packages — the app runs exclusively
+# from /app/.venv and never touches system site-packages at runtime.
+CVE-2025-47273
