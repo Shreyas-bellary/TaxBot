@@ -8,7 +8,7 @@ const LINE_HEIGHT_PX = 24;
 const SHELL_PADDING_X = "px-4";
 
 const SAMPLE_QUESTIONS = [
-  "What is the standard deduction for tax year 2024?",
+  "What is the standard deduction for tax year 2025?",
   "How do I file Form 1040 if I'm self-employed?",
   "Who qualifies for the Earned Income Tax Credit?",
   "What are the estimated tax payment deadlines?",
