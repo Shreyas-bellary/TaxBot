@@ -10,8 +10,8 @@ export function WelcomeHero() {
         What can I help you with?
       </h1>
       <p className="mx-auto mt-2 max-w-md text-[14px] leading-relaxed text-ink-muted">
-        I answer U.S. tax questions using official IRS forms, instructions, and
-        publications -- every answer cites its sources.
+        I answer U.S. 2025 tax questions using official IRS forms, instructions,
+        and publications — every answer cites its sources.
       </p>
     </div>
   );
