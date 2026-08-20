@@ -313,7 +313,7 @@ def _make_judge_llm(settings: Settings):  # type: ignore[no-untyped-def]
         from ragas.llms import LangchainLLMWrapper
 
         return LangchainLLMWrapper(
-            ChatOpenAI(  # type: ignore[call-arg]
+            ChatOpenAI(
                 model=settings.eval_judge_model,
                 api_key=settings.openrouter_api_key.get_secret_value(),
                 base_url="https://openrouter.ai/api/v1",

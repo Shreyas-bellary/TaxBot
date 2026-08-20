@@ -137,7 +137,7 @@ module = [
     "asyncpg",
     "ragas.*",
     "datasets.*",
-    "langchain_community.*",
+    "langchain_openai.*",
     "langchain_core.*",
     "langchain_huggingface.*",
     "unstructured_client.*",
